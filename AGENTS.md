@@ -50,4 +50,13 @@ Full text: `PLAN.md` §18.
 
 ## Commands
 
-Filled in during Phase 1. Until then, see `PLAN.md` §21.2 for the intended bootstrap.
+```bash
+pnpm install
+pnpm docker:up          # Chroma (Docker, localhost-bound)
+pnpm prisma:generate    # Prisma client (output: apps/api/src/generated)
+pnpm dev                # shared watcher + API on :3001
+pnpm run ci             # lint → typecheck → unit tests → build
+```
+
+- Use `pnpm run ci`; bare `pnpm ci` is pnpm's own install/frozen-lockfile command.
+- Unit tests run with an injected model transport and need no API keys or network.

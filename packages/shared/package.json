@@ -1,0 +1,22 @@
+{
+  "name": "@shopping-agent/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared zod contracts: error codes, DTOs, SSE events",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "5.1.1"
+  }
+}

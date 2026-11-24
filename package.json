@@ -1,0 +1,32 @@
+{
+  "name": "shopping-agent",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI-agent e-commerce MVP (Next.js + NestJS + LangGraph + Prisma/SQLite + Chroma)",
+  "packageManager": "pnpm@12.23.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @shopping-agent/shared build && pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "typecheck": "pnpm --filter @shopping-agent/shared build && pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:watch": "pnpm -r --parallel test:watch",
+    "prisma:generate": "pnpm --filter @shopping-agent/api prisma:generate",
+    "db:migrate": "pnpm --filter @shopping-agent/api db:migrate",
+    "db:migrate:dev": "pnpm --filter @shopping-agent/api db:migrate:dev",
+    "db:reset": "pnpm --filter @shopping-agent/api db:reset",
+    "db:seed": "pnpm --filter @shopping-agent/api db:seed",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.9",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,22 @@
+# Chroma (vector store for policy/RAG chunks). Single-instance deployment:
+# binds to localhost only; the API is the only consumer.
+services:
+  chroma:
+    image: chromadb/chroma:1.5.9 # pinned; no :latest (PLAN §18)
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - chroma-data:/var/lib/chroma
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -qO- http://127.0.0.1:8000/api/v2/heartbeat >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  chroma-data:

@@ -1,0 +1,38 @@
+// Prisma 7: schema defines models only; the URL lives in prisma.config.ts.
+// IDs are ULIDs generated in the service layer (PLAN §5).
+// Phase 1 ships auth models; the rest of the catalog arrives in Phase 2.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String    @id
+  email        String    @unique // lowercased in the service layer
+  passwordHash String    @map("password_hash")
+  name         String
+  createdAt    DateTime  @default(now()) @map("created_at")
+  address      Address?
+
+  @@map("users")
+}
+
+model Address {
+  id         String   @id
+  userId     String   @unique @map("user_id")
+  line1      String   @map("line1")
+  line2      String?  @map("line2")
+  city       String
+  region     String?
+  postalCode String   @map("postal_code")
+  country    String
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("addresses")
+}
