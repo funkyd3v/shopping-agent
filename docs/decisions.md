@@ -57,3 +57,10 @@ ADR-lite log. Append only. Format: date, status, decision, why, alternatives.
 **Decision:** Root `typecheck` builds `packages/shared` before the recursive run (nodenext resolves its `dist`). Biome formats/lints code only; Markdown and YAML are excluded from formatting. The model gateway rethrows `NO_CASSETTE` instead of folding it into `ALL_MODELS_FAILED`.
 **Why:** A green `pnpm run ci` is the Phase 1 exit condition; formatting the spec produced 365 lines of unrelated churn; and replay failures must reach callers as `LLM_MODE_NO_CASSETTE` rather than a generic provider error.
 **Alternatives:** tsconfig `paths` to the shared source (breaks the Nest runtime without a build); formatting all files (rejected: documentation churn).
+
+## 2026-11-24 — Initial migration scope, Phase 1 seed, and migrations smoke test
+
+**Status:** accepted
+**Decision:** The first migration (`20261124170850_init_user_address`) creates only `users` and `addresses` with their unique indexes and a cascading FK; FTS5, triggers, and other invariant SQL stay in Phase 2 custom migrations. Add a minimal idempotent seed (3 demo users with addresses) so `pnpm db:reset` has something to run, and make `db:reset` explicitly `prisma migrate reset --force && prisma db seed` because Prisma 7.10 does not invoke the configured seed on reset. A unit spec applies the real migration SQL to an in-memory `node:sqlite` database (no live DB, network, or Prisma CLI).
+**Why:** Phase 1 needs a verifiable auth schema, not the full catalog; a green `db:migrate`/`db:reset` is the gate, and the in-memory spec catches index/FK regressions before migrations reach a real file.
+**Alternatives:** `prisma db push` (forbidden by PLAN §18); adding FTS5/triggers now (deferred to Phase 2 as specified); `db:reset` with `--skip-seed` (rejected: weakens the documented reset semantics); better-sqlite3 as a direct test dependency (rejected: `node:sqlite` needs no extra package on Node 24+).
