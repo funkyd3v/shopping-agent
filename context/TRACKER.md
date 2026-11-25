@@ -15,8 +15,8 @@
 
 ## Now
 
-- **Phase:** 2 — Data and Catalog 🟨 (steps 1–6 delivered; final health check + CI gate remain)
-- **Next action:** add a non-fatal Chroma health check, refresh `context/data.md` + `context/interfaces.md`, run `pnpm run ci`, and close Phase 2.
+- **Phase:** 2 — Data and Catalog ✅ (closed 2026-11-25; `pnpm run ci` green)
+- **Next action:** start Phase 3 — RAG chat (PLAN §7): retrieval + `/rag/chat` SSE + `/help`.
 - **Blockers:** none. Chroma runs on `127.0.0.1:8000`; 52 policy chunks are ingested.
 - **Open decisions:** orders REST is read-only until Phase 6 (cancel moves there); `/orders` shows no AI badge or cancel button yet.
 
@@ -25,7 +25,7 @@
 - `PLAN.md` v5 is the approved specification; the context layer and decisions log exist.
 - **Phase 1 (closed):** pnpm/TS/Biome monorepo, shared zod contracts, NestJS API (env validation, pino, Prisma, auth, gateway with fallback/breaker/record-replay), Next.js shell, Docker Compose for Chroma, green `pnpm run ci`; live gateway call + fallback and 768-dim embeddings proven.
 - **Early catalog/cart slice (Phase 1 request):** 100 products with FTS5/triggers, 673 generated reviews, full product/cart REST + pages, live header badge.
-- **Phase 2:** orders/chat/usage/audit schema, 8 historical orders + 5 security/PII fixture reviews, 7 policy documents, idempotent Chroma ingest (`rag:ingest`), read-only orders REST, `/orders` list/detail pages with status filters and cursor pagination.
+- **Phase 2:** orders/chat/usage/audit schema, 8 historical orders + 5 security/PII fixture reviews, 7 policy documents, idempotent Chroma ingest (`rag:ingest`), read-only orders REST, `/orders` list/detail pages with status filters and cursor pagination, non-fatal `/health/chroma` probe.
 
 ## Phase progress
 
@@ -33,7 +33,7 @@
 |---|---|---|---|
 | 0 — Planning | ✅ | PLAN.md v5 approved | `PLAN.md` |
 | 1 — Foundation | ✅ | Gateway call + fallback logged; missing env fails fast; CI green | 45+ tests; live groq→gemini fallback |
-| 2 — Data and Catalog | 🟨 | Seed + ingest populate DB/Chroma; FTS/filters work; reruns do not duplicate | 100 products / 678 reviews / 8 orders; 52 chunks (rerun: 0 embedded); orders REST + pages verified via proxy |
+| 2 — Data and Catalog | ✅ | Seed + ingest populate DB/Chroma; FTS/filters work; reruns do not duplicate | 100 products / 678 reviews / 8 orders; 52 chunks (rerun: 0 embedded); orders REST + pages verified via proxy; `/health/chroma` ok (52 chunks) and 200/unavailable with Chroma paused; CI green |
 | 3 — RAG Chat | ⬜ | 10 policy questions correct with sources; out-of-scope redirect; hit-rate reported | — |
 | 4 — Read-only Agents | ⬜ | Search/review/history via `/assistant`; `agent_runs` recorded; retry deduped | — |
 | 5 — Cart | ⬜ | UI + chat cart ops; limits; persistence; cross-user 404 | — |
@@ -48,8 +48,8 @@
 - [x] `rag:ingest` / `rag:ingest:reset`: markdown-aware chunker, explicit Gemini embeddings @768, Chroma collection metadata pinning, stale-chunk pruning; reruns make zero embedding calls
 - [x] `GET /orders` (status filter, opaque keyset cursor, `itemCount`) and `GET /orders/:id`; every query scoped by user; cross-user reads return 404
 - [x] Web `/orders` (filter tabs, load more, empty/auth/error states) and `/orders/:id` (items, totals, address snapshot, cancellation dates); header "Orders" link
-- [ ] Chroma health check (non-fatal) surfaced next to DB health
-- [ ] `pnpm run ci` green after Phase 2; context docs + decisions updated
+- [x] Chroma health check (non-fatal) surfaced next to DB health: public `GET /health/chroma` (read-only collection/metadata/count probe, 2 s timeout, always 200; `GET /health` stays DB-only)
+- [x] `pnpm run ci` green after Phase 2 (lint, typecheck, 85 tests across workspaces, build); context docs + decisions updated
 
 ## Phase 1 checklist (condensed)
 
@@ -69,6 +69,7 @@
 | 2026-11-25 | 2 | Orders/chat/usage/audit schema + triggers; historical orders and fixture reviews seeded; policy docs | `prisma/**`, `content/policies/**` | Ingest |
 | 2026-11-25 | 2 | Idempotent Chroma policy ingest verified live (7 sources / 52 chunks; rerun 0 embedded) | `apps/api/src/rag/**`, `apps/api/scripts/**` | Orders REST |
 | 2026-11-25 | 2 | Read-only orders REST (cursor, filters, user scoping) and `/orders` pages + nav | `packages/shared/src/orders.ts`, `apps/api/src/orders/**`, `apps/web/**` | Health + CI |
+| 2026-11-25 | 2 | Non-fatal `/health/chroma` probe (read-only, 2 s timeout, metadata assert), docs sync, CI green; Phase 2 closed | `apps/api/src/health/**`, `apps/api/src/rag/chroma.store.ts`, `apps/api/src/health.controller.ts`, `context/*`, `docs/decisions.md` | Phase 3 |
 
 ## Blockers and open questions
 

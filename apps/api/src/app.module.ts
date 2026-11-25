@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { originCheckMiddleware } from './common/middleware/origin-check.middleware';
 import { getEnv, validateEnv } from './config/env';
 import { PrismaModule } from './db/prisma.module';
+import { ChromaHealthService } from './health/chroma-health.service';
 import { HealthController } from './health.controller';
 import { pinoOptions } from './logging/pino.options';
 import { ModelGatewayModule } from './model-gateway/model-gateway.module';
@@ -38,6 +39,7 @@ import { UsersModule } from './users/users.module';
   ],
   controllers: [HealthController],
   providers: [
+    ChromaHealthService,
     // Global guard: everything is authenticated unless marked @Public().
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],

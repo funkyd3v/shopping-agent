@@ -17,7 +17,7 @@ Source: PLAN.md §5.
 | `orders` | id, order_number (unique), user_id, status, source, placed_by, total_cents, currency, idempotency_key, cart_id?, address_snapshot_json, turn_id?, client_message_id?, created_at, cancellable_until?, cancelled_at?, cancelled_by? |
 | `order_items` | id, order_id, product_id, product_name, sku, qty (>0), unit_price_cents |
 | `chat_sessions` | id, user_id, kind (`rag`/`agent`), title?, created_at, updated_at |
-| `messages` | id, session_id, seq, role, content, model_content?, metadata_json, status, client_message_id?, created_at; **unique(session_id, client_message_id)** where not null |
+| `messages` | id, session_id, seq, role, content, model_content?, metadata_json, status, client_message_id?, created_at; **unique(session_id, seq)**, **unique(session_id, client_message_id)** where not null |
 | `token_usage` | id, user_id?, session_id?, run_id?, kind, model, provider, input_tokens, output_tokens, estimated, latency_ms, created_at |
 | `guardrail_events` | id, user_id, session_id, rule, action, score?, details_json, request_id, created_at |
 | `agent_runs` | id, session_id, turn_id, client_message_id, agent, route, model, provider, prompt_version, tool_calls_json, duration_ms, status, error_code?, created_at |
@@ -39,8 +39,8 @@ Enum-like columns (`status`, `source`, `placed_by`, `kind`, `role`) are `String`
 
 ## Prisma + SQLite rules
 
-- `prisma migrate dev` locally, `prisma migrate deploy` in CI/prod. Never `db push`/`db pull` on shared DBs.
-- Prisma cannot model FTS5, CHECK constraints, or triggers. Use `prisma migrate dev --create-only`, edit the SQL, then apply; test with `prisma migrate reset`.
+- `prisma migrate dev` cannot run on this database: it treats the FTS5 shadow tables as drift and is interactive. Write migrations by hand (or `--create-only` on a scratch DB), review the SQL, add triggers/indexes, then apply with `prisma migrate deploy`. Never `db push`/`db pull` on shared DBs.
+- Prisma cannot model FTS5, CHECK constraints, or triggers. Add them by hand in the migration SQL; test with `prisma migrate reset` and the in-memory `migrations.spec.ts`.
 - SQLite cannot add CHECK constraints after table creation. Prefer `BEFORE INSERT/UPDATE` triggers for `qty > 0`, `stock >= 0`, `total_cents >= 0`, `rating` 1–5, and enum-like values.
 - **Transactions:** acquire the process-wide write mutex before `prisma.$transaction` (interactive, explicit `maxWait`/`timeout`). Prisma does not expose `BEGIN IMMEDIATE`; the mutex serializes order/checkout writes on the single instance. Also set `busy_timeout`.
 - **Pragmas:** `journal_mode=WAL` and `busy_timeout=5000` on startup; configure a single SQLite connection (`connection_limit=1`) and verify `foreign_keys=ON`.
@@ -52,7 +52,15 @@ Enum-like columns (`status`, `source`, `placed_by`, `kind`, `role`) are `String`
 
 - Wire `prisma db seed` in `apps/api/package.json`.
 - Deterministic RNG (`seedrandom`) so demos and evals are reproducible; seed is idempotent and safe to rerun.
-- ~100 products across ~6 categories, 3–10 reviews each with varied ratings/tone.
-- 3 demo users (each with an address and documented password), historical orders in `placed`, `cancelled`, `shipped`, `delivered`; one user with a non-empty cart.
-- Test fixtures: malicious review (prompt injection), benign-but-suspicious review, PII review, markdown/HTML injection link, out-of-stock product, product with no reviews, price-change product, very long description.
+- 100 products across 6 categories, 3–10 generated reviews each (678 reviews total) with varied ratings/tone.
+- 3 demo users (each with an address and documented password, `Demo1234!`); **8 historical orders** across `placed`/`cancelled`/`shipped`/`delivered` with fixed timestamps, address snapshots, and 9 order items; one user with a non-empty cart (2 lines).
+- Seeded `placed` orders have expired cancel windows so Phase 6 demos create a fresh order; `order_items` are deleted/recreated on rerun to avoid duplicates.
+- Test fixtures: malicious review (prompt injection), benign-but-suspicious review, PII review, markdown/HTML injection link on 5 distinct SKUs, out-of-stock product, product with no reviews, price-change product, very long description.
 - Policy docs in `content/policies/` (shipping, returns/refunds, warranty, payment methods, privacy, FAQ, cancellation) with real numbers/tables so RAG answers are verifiable.
+
+## Policy index (`pnpm rag:ingest`)
+
+- 7 markdown documents → 52 chunks (`policy-markdown-v1`, H2-aware, tables kept intact, ~700-token cap, ~80-token overlap).
+- Chroma collection `store_policies` pins `embedding_model=gemini-embedding-001`, `embedding_dim=768`, `chunker_version=policy-markdown-v1`, `hnsw:space=cosine`.
+- Ingest compares chunk ids + SHA-256 content hashes: unchanged rerun makes **zero** embedding calls; changed chunks are re-embedded; stale ids and removed sources are deleted.
+- `rag:ingest:reset` deletes and rebuilds the collection (required after changing the embedding model/dimension).

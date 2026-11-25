@@ -1,4 +1,9 @@
-import { ChromaClient, ChromaNotFoundError, type Collection } from 'chromadb';
+import {
+  ChromaClient,
+  type ChromaClientArgs,
+  ChromaNotFoundError,
+  type Collection,
+} from 'chromadb';
 import type { EmbeddedPolicyChunk, PolicyVectorStore, StoredChunk } from './ingest';
 
 export type ChromaPolicyStoreOptions = {
@@ -7,6 +12,8 @@ export type ChromaPolicyStoreOptions = {
   embeddingModel: string;
   embeddingDim: number;
   chunkerVersion: string;
+  /** Per-store abort deadline; set it on a single-use probe (health check). */
+  timeoutMs?: number;
 };
 
 const PAGE_SIZE = 500;
@@ -27,11 +34,16 @@ export class ChromaPolicyStore implements PolicyVectorStore {
     this.options = options;
     const parsed = new URL(options.url);
     const defaultPort = parsed.protocol === 'https:' ? 443 : 8000;
-    this.client = new ChromaClient({
+    const clientArgs: ChromaClientArgs = {
       host: parsed.hostname,
       port: parsed.port ? Number(parsed.port) : defaultPort,
       ssl: parsed.protocol === 'https:',
-    });
+    };
+    if (options.timeoutMs !== undefined) {
+      // One shared deadline: a probe store is built per check and used once.
+      clientArgs.fetchOptions = { signal: AbortSignal.timeout(options.timeoutMs) };
+    }
+    this.client = new ChromaClient(clientArgs);
   }
 
   async ensureCollection(): Promise<void> {
@@ -119,6 +131,13 @@ export class ChromaPolicyStore implements PolicyVectorStore {
 
   async heartbeat(): Promise<void> {
     await this.client.heartbeat();
+  }
+
+  /** Non-mutating readiness check: collection exists, metadata matches, count. */
+  async health(): Promise<{ chunkCount: number }> {
+    const collection = await this.client.getCollection({ name: this.options.collectionName });
+    this.assertMetadata(collection);
+    return { chunkCount: await collection.count() };
   }
 
   private assertMetadata(collection: Collection): void {

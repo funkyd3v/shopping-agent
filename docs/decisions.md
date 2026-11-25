@@ -114,3 +114,17 @@ ADR-lite log. Append only. Format: date, status, decision, why, alternatives.
 **Decision:** `/orders` renders status filter tabs and a "Load more" cursor button; `/orders/:id` shows item snapshots, totals, the address snapshot, and cancellation dates but no cancel button yet. Dates are formatted with `Intl.DateTimeFormat` only in client components after fetch, so the browser locale/time zone applies.
 **Why:** Matches the existing cart/product client-fetch pattern (401 → sign-in panel, skeleton while loading); formatting after hydration avoids SSR/client time-zone mismatches.
 **Alternatives:** server-side rendering of orders (rejected: auth cookie forwarding and per-user caching complexity); relative timestamps (rejected: less precise for support/debugging).
+
+## 2026-11-25 — Chroma readiness probe is separate and non-fatal
+
+**Status:** accepted
+**Decision:** Expose `GET /health/chroma` next to `GET /health` (DB). The probe is read-only: `getCollection` (never `getOrCreateCollection`), assert the pinned collection metadata, then `count()`. It always responds **200** with `{ status: 'ok' | 'unavailable', collection, chunkCount, latencyMs, error? }`, applies a 2 s `AbortSignal.timeout`, truncates provider errors to 200 chars, and returns no credentials. A failed probe is never cached or repaired.
+**Why:** PLAN §15 requires `/health` for API + DB and a separate readiness check for Chroma; RAG must degrade gracefully while catalog/cart/orders keep working. Creating the collection during a health check would hide a broken index and mutate state from a GET.
+**Alternatives:** include Chroma in `/health` (rejected: a vector-store outage would fail the API readiness gate); call Chroma's `heartbeat` only (rejected: proves the server is up, not that the index exists, matches env, and has chunks); auto-create the collection on a miss (rejected: repairs instead of reporting).
+
+## 2026-11-25 — Hand-written migrations only (FTS5 drift)
+
+**Status:** accepted
+**Decision:** Do not run `prisma migrate dev` against this database. Author migration SQL by hand, review triggers/indexes/constraints, and apply with `prisma migrate deploy`; validate with `prisma migrate reset` and the in-memory `migrations.spec.ts`.
+**Why:** `prisma migrate dev` treats the FTS5 shadow tables (`products_fts_*`) as drift and is interactive, so it cannot run non-interactively in this repo. Hand-written SQL keeps FTS5, triggers, and invariant checks in the same reviewed migration.
+**Alternatives:** `db push`/`db pull` (forbidden by PLAN §18); excluding the FTS tables from drift detection (Prisma has no such switch for SQLite).

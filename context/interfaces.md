@@ -6,6 +6,9 @@ Source: PLAN.md §11–15.
 ## API endpoints
 
 ```text
+GET  /health                                          # API + DB (503 when DB is down)
+GET  /health/chroma                                   # non-fatal Chroma readiness (always 200)
+
 POST /auth/register | /auth/login | /auth/logout      GET /auth/me
 GET  /products?q=&category=&minPrice=&maxPrice=&limit=&cursor=
 GET  /products/:id
@@ -28,7 +31,8 @@ GET  /usage/me                                        # budgets, no UI
 GET  /users/me                                        PATCH /users/me/address
 ```
 
-- All routes except `/auth/*` require JWT (httpOnly cookie, 24 h, `{ sub, iat, exp }` only).
+- All routes except `/auth/*` require JWT (httpOnly cookie, 24 h, `{ sub, iat, exp }` only). `/health*` is public.
+- `/health` runs `SELECT 1` and returns 503 `PROVIDER_UNAVAILABLE` when the DB is down. `/health/chroma` is a read-only probe (`getCollection` + metadata assert + count, 2 s timeout) that always returns 200 with `{ status: 'ok' | 'unavailable', collection, chunkCount, latencyMs, error? }`; Chroma being down degrades `/help` only.
 - `clientMessageId` required on both chat endpoints; `clientRequestId` required on `/cart/checkout`.
 - Ownership checks on every resource: another user's resource returns 404.
 - Session `kind` must match the endpoint (`rag` vs `agent`).
@@ -86,7 +90,7 @@ Next.js rewrites `/api/*` to NestJS so cookies are same-origin.
 - Auth: `JWT_SECRET`, `COOKIE_SECURE`.
 - LLM: `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`, `LLM_MODE`, `PROVIDER_DISABLE`, `PROVIDER_DAILY_TOKEN_BUDGET`.
 - Chroma/embeddings: `CHROMA_URL`, `CHROMA_COLLECTION`, `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_DIM`.
-- DB: `DATABASE_PATH`, `CHECKPOINT_DATABASE_PATH`.
+- DB: `DATABASE_URL`, `CHECKPOINT_DATABASE_PATH`.
 - Limits: `MAX_ORDER_USD`, `MAX_QTY_PER_ITEM`, `MAX_AGENT_ORDERS_PER_DAY`, `MAX_AGENT_SPEND_PER_DAY_USD`, `CANCEL_WINDOW_MINUTES`, `MAX_CART_LINES`.
 - Budgets: `REQUEST_TOKEN_BUDGET`, `SESSION_TOKEN_BUDGET`, `DAILY_TOKEN_BUDGET`.
 - Streaming/input: `STREAM_MODE=buffered`, `MAX_MESSAGE_CHARS`.
