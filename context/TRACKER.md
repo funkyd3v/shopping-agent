@@ -15,21 +15,21 @@
 
 ## Now
 
-- **Phase:** 1 — Foundation
-- **Status:** 🟨 in progress (code complete; live gateway acceptance pending keys)
-- **Next action:** Add `GROQ_API_KEY` + `GOOGLE_API_KEY` to `.env`, then run the live `/gateway/test` call, disable one provider to prove fallback, confirm the served provider/model log line, and update `models.config.ts` `verified_at`. Then start Phase 2.
-- **Blockers:** `GROQ_API_KEY`/`GOOGLE_API_KEY` are empty in `.env`; the local Docker daemon is not running (Compose config validates, Chroma healthcheck unverified).
-- **Open decisions:** model IDs/free-tier limits need the live verification pass; embedding provider decided (Gemini).
+- **Phase:** 1 — Foundation ✅ (acceptance gate met)
+- **Next action:** Start Phase 2 — Data and Catalog: full Prisma schema (products, reviews, carts, orders, chat tables, usage/guardrail/run tables), custom SQL migrations for FTS5 + triggers + invariants, deterministic seed, then products/orders REST + pages.
+- **Blockers:** local Docker daemon is stopped; start it for Chroma (`pnpm docker:up`) before `rag:ingest` / the Phase 2 gate.
+- **Open decisions:** embedding model is `gemini-embedding-001` @768 (revisit `gemini-embedding-2` before ingest only if desired); free-tier quotas still unmeasured.
 
 ## Done so far
 
 - `PLAN.md` v5 is the approved specification.
 - Context layer exists: `AGENTS.md`, `context/*`, `docs/decisions.md`.
 - Phase 1 scaffold: pnpm workspace, strict TS, Biome, `packages/shared`, NestJS API with env validation, pino, Prisma service, auth (register/login/logout/me), gateway (chains/fallback/breaker/record-replay), Docker Compose for Chroma.
-- **CI pipeline green**: `pnpm run ci` (lint → typecheck → unit tests → build) passes locally; 19 unit tests (6 shared DTO, 9 model gateway, 4 migration smoke; +3 exception-filter after the runtime fix).
+- **CI pipeline green**: `pnpm run ci` (lint → typecheck → unit tests → build) passes locally; 24 unit tests (6 shared DTO, 2 web form, 16 API: 9 model gateway, 4 migration smoke, 3 exception filter).
 - **Initial Prisma migration**: `20261124170850_init_user_address` (`users`, `addresses`, unique indexes, cascade FK) + idempotent Phase 1 seed (3 demo users with addresses); `pnpm db:migrate` and `pnpm db:reset` verified on fresh SQLite files.
 - **Web app**: Next.js App Router shell (`/`, `/login`, `/register`), Rubik + Nunito Sans, minimal neutral/violet tokens, zod-backed forms with error summary + address on registration, `/api/*` rewrite to NestJS.
-- **API runtime verified**: `node dist/main.js` boots (root `.env` loaded before zod), auth flows work through the Next rewrite (register → me → logout → 401 → login → me), missing env fails fast, `/gateway/test` without keys returns `PROVIDER_UNAVAILABLE`.
+- **API runtime verified**: `node dist/main.js` boots (root `.env` loaded before zod), auth flows work through the Next rewrite, missing env fails fast, `/gateway/test` without keys returns `PROVIDER_UNAVAILABLE`.
+- **Phase 1 acceptance (live)**: `groq/openai/gpt-oss-20b` served the test call in 1.3s and logged `chain/provider/model/attempt/elapsedMs`; with `PROVIDER_DISABLE=groq` the same call was served by `gemini/gemini-3.5-flash-lite`; explicit `gemini-3.6-flash` also works; a live `gemini-embedding-001` call returned 768 dims.
 - Design system synced to the implemented direction in `design-system/shopping-agent/MASTER.md`.
 
 ## Phase progress
@@ -37,7 +37,7 @@
 | Phase | Status | Acceptance gate (short) | Evidence |
 |---|---|---|---|
 | 0 — Planning | ✅ | PLAN.md v5 approved | `PLAN.md` |
-| 1 — Foundation | 🟨 | Gateway test endpoint + fallback + logged call + missing env fails fast + CI green | CI green; 19 tests; auth runtime verified; live gateway/fallback awaiting keys |
+| 1 — Foundation | ✅ | Gateway test endpoint + fallback + logged call + missing env fails fast + CI green | CI green; 24 tests; live call groq→gemini fallback proven; auth verified end-to-end |
 | 2 — Data and Catalog | ⬜ | Seed + ingest populate DB/Chroma; FTS and filters work; reruns do not duplicate | — |
 | 3 — RAG Chat | ⬜ | 10 policy questions correct with sources; out-of-scope redirect; no-match answer; hit-rate reported | — |
 | 4 — Read-only Agents | ⬜ | Search/review/history work via `/assistant`; `agent_runs` recorded; retry deduped; concurrent session 409 | — |
@@ -53,13 +53,13 @@
 - [x] Prisma + SQLite (WAL, `busy_timeout`, FK), Prisma Migrate (`init_user_address`), `PrismaService` singleton
 - [x] Auth: register/login/logout/me, JWT cookie, guard (runtime verified through the web proxy)
 - [x] Next.js login/register pages (registration includes address)
-- [x] Docker Compose for Chroma (pinned image, volume, healthcheck, localhost bind) — `docker compose config` valid; daemon stopped
+- [x] Docker Compose for Chroma (pinned image, volume, healthcheck, localhost bind) — `docker compose config` valid; daemon still stopped
 - [x] Model gateway: role→chain config, capability matrix, fallback, timeouts, provider quotas, record/replay (+ served-call log line)
 - [x] CI skeleton: lint, typecheck, unit, build (green via `pnpm run ci`)
 - [x] `docs/decisions.md` (seeded 2026-11-24, updated 2026-11-25)
-- [ ] Acceptance: live gateway call + disabled-provider fallback proof (needs keys)
+- [x] Acceptance: live gateway call + disabled-provider fallback proof; call logged; missing env fails fast; CI green
 
-> Verified: DB schema/migrations/seed, CI, API boot, auth end-to-end, missing-env fail-fast, gateway error mapping. Pending: live provider call/fallback and Chroma healthcheck (Docker daemon).
+> Evidence: `/gateway/test` served by `groq/openai/gpt-oss-20b`; with `PROVIDER_DISABLE=groq` served by `gemini/gemini-3.5-flash-lite`; explicit `gemini-3.6-flash` works; `gemini-embedding-001` returned 768 dims. Chroma healthcheck still unverified (Docker daemon stopped).
 
 ## Session log
 
@@ -70,12 +70,13 @@
 | 2026-11-24 | 1 | Added the initial Prisma migration (`users`, `addresses`, unique indexes, cascade FK) plus an idempotent Phase 1 seed and a migration smoke test; verified `pnpm db:migrate` (deploy) and `pnpm db:reset` on fresh SQLite files | `apps/api/prisma/migrations/**`, `apps/api/prisma/seed.ts`, `apps/api/src/db/migrations.spec.ts`, `apps/api/package.json`, `apps/api/tsconfig*.json`, `README.md` | Scaffold `apps/web` login/register pages |
 | 2026-11-25 | 1 | Made the API boot for real: dotenv before zod validation, value imports for Nest DI, `rootDir: src` build, public 5xx codes in the exception filter (+3 specs), served-call gateway log; Biome parses Tailwind CSS | `apps/api/src/main.ts`, `apps/api/src/**`, `apps/api/tsconfig.build.json`, `biome.json` | Finish the web scaffold and verify auth |
 | 2026-11-25 | 1 | Committed the Next.js web app (home, login, register with address), synced the design system, verified auth end-to-end through the Next `/api/*` proxy; `pnpm run ci` green | `apps/web/**`, `design-system/shopping-agent/MASTER.md`, `.env.example`, `pnpm-lock.yaml` | Add keys; live gateway + fallback acceptance |
+| 2026-11-25 | 1 | **Phase 1 closed**: verified model IDs against provider docs + live calls; groq primary served the gateway call, gemini served it with groq disabled; call logged with provider/model; embedding key returned 768 dims | `apps/api/src/model-gateway/models.config.ts`, `docs/decisions.md`, `context/TRACKER.md` | Phase 2: schema + FTS5 + seed |
 
 ## Blockers and open questions
 
-- **API keys (Phase 1 gate):** `GROQ_API_KEY` and `GOOGLE_API_KEY` are empty in `.env`; the live gateway call and the disabled-provider fallback cannot be proven yet.
 - **Docker daemon:** stopped locally. `docker compose config` is valid, but the Chroma healthcheck has not run; start Docker before Phase 2 ingest.
-- **Model IDs / free-tier limits:** verify against each provider's live model list once keys exist; record `verified_at` in `models.config.ts` (current entries were written 2026-11-24).
+- **Free-tier quotas:** model IDs/capabilities verified 2026-11-25, but TPM/RPD quotas are unmeasured; keep conservative budgets until Phase 2 usage data exists.
+- **Embedding model:** `gemini-embedding-001` @768 is verified live. Switching to `gemini-embedding-2` would need a full re-index; decide before the first ingest.
 - **Budgets/limits:** proposed values are in `PLAN.md` §10/§20; re-measure after Phase 1.
 - **Cancel window:** proposed 30 minutes; confirm during Phase 6.
 

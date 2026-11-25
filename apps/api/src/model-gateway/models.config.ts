@@ -29,7 +29,7 @@ export interface ChainEntry {
   models: ModelEntry[];
 }
 
-export const VERIFIED_AT = '2026-11-24';
+export const VERIFIED_AT = '2026-11-25';
 
 const GROQ_KEY = 'GROQ_API_KEY';
 const GOOGLE_KEY = 'GOOGLE_API_KEY';
@@ -91,6 +91,8 @@ export const CHAINS: Record<string, ChainEntry> = {
 export const EMBEDDING: { provider: ProviderId; model: string; dimensions: number } = {
   provider: 'gemini',
   model: 'gemini-embedding-001',
+  // Gemini recommends 768/1536/3072; 768 keeps the Chroma collection small.
+  // The ingest step must pass outputDimensionality=768 explicitly.
   dimensions: 768,
 };
 

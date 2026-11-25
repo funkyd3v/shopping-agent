@@ -46,10 +46,11 @@ ADR-lite log. Append only. Format: date, status, decision, why, alternatives.
 
 ## 2026-11-24 — Model IDs and free-tier limits
 
-**Status:** open
-**Decision:** Verify availability, capabilities, and quotas at build time; record `verified_at` in `models.config.ts`.
-**Why:** Free-tier model IDs and limits change frequently; do not rely on memory.
-**Alternatives:** pin to a known-good set after verification.
+**Status:** accepted (2026-11-25 verification)
+**Decision:** Pin Groq `openai/gpt-oss-20b` / `openai/gpt-oss-120b` and Gemini `gemini-3.5-flash-lite` / `gemini-3.6-flash`; embeddings `gemini-embedding-001` at 768 dimensions. `verified_at = 2026-11-25`.
+**Evidence:** IDs checked against the providers' published model lists; live calls served `groq/openai/gpt-oss-20b` (router), `gemini/gemini-3.5-flash-lite` (router fallback with `PROVIDER_DISABLE=groq`), and `gemini/gemini-3.6-flash` (explicit); a live `embedContent` call with `outputDimensionality: 768` returned 768 values.
+**Still open:** exact free-tier quotas/TPM were not measured; keep the conservative `PROVIDER_DAILY_TOKEN_BUDGET` and per-user budgets until Phase 2 usage data exists.
+**Alternatives:** `gemini-embedding-2` (newer multimodal, but no index exists yet and the plan fixes one model; revisit before Phase 2 ingest only if desired).
 
 ## 2026-11-24 — CI pipeline and formatter scope
 
