@@ -37,18 +37,19 @@ export class RagController {
     const abort = new AbortController();
     const onClose = () => abort.abort();
     res.on('close', onClose);
-
-    openSseStream(res);
-    writeSseEvent(res, {
-      type: 'message_start',
-      messageId: prepared.turnId,
-      sessionId: prepared.session.id,
-      runId: prepared.runId,
-    });
-    writeSseEvent(res, { type: 'status', phase: 'thinking' });
-    const stopHeartbeat = startSseHeartbeat(res);
+    let stopHeartbeat: (() => void) | undefined;
 
     try {
+      openSseStream(res);
+      writeSseEvent(res, {
+        type: 'message_start',
+        messageId: prepared.turnId,
+        sessionId: prepared.session.id,
+        runId: prepared.runId,
+      });
+      writeSseEvent(res, { type: 'status', phase: 'thinking' });
+      stopHeartbeat = startSseHeartbeat(res);
+
       const result = await this.rag.run(prepared, {
         signal: abort.signal,
         onProgress: (phase) => writeSseEvent(res, { type: 'status', phase }),
@@ -104,7 +105,7 @@ export class RagController {
         status: 'error',
       });
     } finally {
-      stopHeartbeat();
+      stopHeartbeat?.();
       prepared.release();
       res.off('close', onClose);
       if (!res.writableEnded) res.end();
