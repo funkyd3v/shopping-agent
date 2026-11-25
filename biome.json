@@ -14,7 +14,8 @@
       "!**/generated",
       "!**/data",
       "!**/.opencode",
-      "!**/*.tsbuildinfo"
+      "!**/*.tsbuildinfo",
+      "!**/next-env.d.ts"
     ]
   },
   "formatter": {

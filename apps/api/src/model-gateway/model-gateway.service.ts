@@ -125,12 +125,17 @@ export class ModelGatewayService {
       try {
         const content = await this.invokeWithTimeout(entry, req);
         this.recordSuccess(entry.provider);
+        const elapsedMs = Date.now() - started;
+        // Phase 1 acceptance: every served call is logged with provider + model.
+        this.logger.log(
+          `gateway: chain=${req.chain} provider=${entry.provider} model=${entry.model} attempt=${i + 1} elapsedMs=${elapsedMs}`,
+        );
         return {
           content,
           provider: entry.provider,
           model: entry.model,
           attempt: i,
-          elapsedMs: Date.now() - started,
+          elapsedMs,
         };
       } catch (err) {
         lastError = err;
