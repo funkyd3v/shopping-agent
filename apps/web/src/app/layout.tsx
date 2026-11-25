@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Nunito_Sans, Rubik } from 'next/font/google';
 import Link from 'next/link';
 import { AccountMenu } from '@/components/account-menu';
+import { CartBadge } from '@/components/cart-badge';
 import './globals.css';
 
 const bodyFont = Nunito_Sans({ subsets: ['latin'], variable: '--font-body', display: 'swap' });
@@ -29,25 +30,36 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 
         <header className="sticky top-0 z-10 border-b border-border/80 bg-background/85 backdrop-blur">
           <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between gap-4 px-6">
-            <Link
-              href="/"
-              className="flex items-center gap-2.5 rounded-md font-display text-base font-semibold tracking-tight"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="size-5"
+            <div className="flex items-center gap-4 sm:gap-6">
+              <Link
+                href="/"
+                className="flex items-center gap-2.5 rounded-md font-display text-base font-semibold tracking-tight"
               >
-                <path d="M6 8h12l-1 12H7L6 8Z" />
-                <path d="M9 8V6a3 3 0 0 1 6 0v2" />
-              </svg>
-              Shopping Agent
-            </Link>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="size-5"
+                >
+                  <path d="M6 8h12l-1 12H7L6 8Z" />
+                  <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+                </svg>
+                <span className="hidden sm:inline">Shopping Agent</span>
+              </Link>
+              <nav aria-label="Main" className="flex items-center gap-1">
+                <Link
+                  href="/products"
+                  className="inline-flex min-h-11 items-center rounded-md px-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Products
+                </Link>
+                <CartBadge />
+              </nav>
+            </div>
             <AccountMenu />
           </div>
         </header>

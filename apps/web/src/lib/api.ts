@@ -1,4 +1,13 @@
-import type { LoginInput, PublicUser, RegisterInput } from '@shopping-agent/shared';
+import type {
+  AddCartItemInput,
+  Cart,
+  LoginInput,
+  ProductDetail,
+  ProductList,
+  PublicUser,
+  RegisterInput,
+  UpdateCartItemInput,
+} from '@shopping-agent/shared';
 import type { FieldIssue } from './form-errors';
 
 type ErrorBody = {
@@ -43,6 +52,52 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   return data as T;
 }
+
+export type ProductQuery = {
+  q?: string;
+  category?: string;
+  /** Dollars, as accepted by GET /products. */
+  minPrice?: string;
+  maxPrice?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export const productApi = {
+  list: (query: ProductQuery = {}) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== '') params.set(key, String(value));
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : '';
+    return request<ProductList>(`/api/products${suffix}`);
+  },
+
+  get: (id: string) => request<ProductDetail>(`/api/products/${encodeURIComponent(id)}`),
+};
+
+export const cartApi = {
+  get: () => request<{ cart: Cart }>('/api/cart'),
+
+  addItem: (input: AddCartItemInput) =>
+    request<{ cart: Cart }>('/api/cart/items', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  updateItem: (productId: string, input: UpdateCartItemInput) =>
+    request<{ cart: Cart }>(`/api/cart/items/${encodeURIComponent(productId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+
+  removeItem: (productId: string) =>
+    request<{ cart: Cart }>(`/api/cart/items/${encodeURIComponent(productId)}`, {
+      method: 'DELETE',
+    }),
+
+  clear: () => request<{ cart: Cart }>('/api/cart', { method: 'DELETE' }),
+};
 
 export const authApi = {
   login: (input: LoginInput) =>

@@ -53,11 +53,11 @@ export default function HomePage() {
           </p>
 
           <div className="flex flex-col gap-3 sm:flex-row">
-            <Link href="/register" className="btn btn-primary">
-              Create an account
+            <Link href="/products" className="btn btn-primary">
+              Browse products
             </Link>
-            <Link href="/login" className="btn btn-secondary">
-              Sign in
+            <Link href="/register" className="btn btn-secondary">
+              Create an account
             </Link>
           </div>
         </div>
