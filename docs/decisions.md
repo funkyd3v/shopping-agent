@@ -128,3 +128,32 @@ ADR-lite log. Append only. Format: date, status, decision, why, alternatives.
 **Decision:** Do not run `prisma migrate dev` against this database. Author migration SQL by hand, review triggers/indexes/constraints, and apply with `prisma migrate deploy`; validate with `prisma migrate reset` and the in-memory `migrations.spec.ts`.
 **Why:** `prisma migrate dev` treats the FTS5 shadow tables (`products_fts_*`) as drift and is interactive, so it cannot run non-interactively in this repo. Hand-written SQL keeps FTS5, triggers, and invariant checks in the same reviewed migration.
 **Alternatives:** `db push`/`db pull` (forbidden by PLAN §18); excluding the FTS tables from drift detection (Prisma has no such switch for SQLite).
+
+## 2026-11-25 — RAG retrieval tuning and distance semantics
+
+**Status:** accepted
+**Decision:** Retrieve `RAG_TOP_K=5` chunks from Chroma (`hnsw:space=cosine`) and keep only chunks with **cosine distance ≤ `RAG_MAX_DISTANCE=0.38`**. Both are env-overridable and zod-validated; defaults live in `guardrails.policy.ts`.
+**Evidence (live `pnpm eval:rag`):** expected in-scope sections ranked #1–#2 at distances 0.185–0.333; the deliberately unrelated gift-wrapping question scored 0.410. A 0.38 cut keeps ~0.05 distance margin on both sides. Full eval: 10/10 hit-rate@5, 100% deterministic fact checks, 2/2 out-of-scope redirects, 1/1 no-match.
+**Why:** Chroma returns a distance, not a similarity. Comparing it to a similarity threshold is the classic RAG bug; the gap between in-scope and unrelated questions is narrow enough that an arbitrary threshold would either answer from unrelated chunks or refuse valid policies.
+**Alternatives:** a similarity transform (`1 - distance`) with a 0.6 threshold (equivalent, but easier to confuse); a model-side refusal only (rejected: an ungrounded match reaches the model); a larger top-k (rejected: more unrelated context for a small model).
+
+## 2026-11-25 — Buffered SSE, session replay, and follow-up scope
+
+**Status:** accepted
+**Decision:** `/rag/chat` is a `POST` + raw `@Res()` SSE stream in **buffered** mode: generate → output guardrails → `Sources:` footer → persist assistant row → write `token` frames (48-char chunks) → `done`. Reuse `(sessionId, clientMessageId)` replays the stored assistant row; an unfinished/failed turn re-runs with the same ids under a per-session in-process lock (second concurrent turn → 409). A follow-up-shaped message in a session with history is treated as in-scope and condensed before retrieval; the classifier only runs for standalone ambiguous messages.
+**Why:** PLAN §10 requires the full answer before output PII masking/format checks, and persisting before streaming makes a disconnect lossless. RAG is read-only, so a failed condense/classifier fails open; the distance threshold and no-match copy still prevent answering unrelated questions. The live smoke exposed that "What about returns?" was being redirected by the standalone scope heuristic, so follow-ups now bypass it.
+**Alternatives:** true provider token streaming (rejected: cannot run output guardrails first); re-running a completed turn (rejected: duplicate model spend, duplicate persisted turn); trusting the classifier on every turn (rejected: extra latency/quota for obvious policy questions).
+
+## 2026-11-25 — RAG eval gating and Unicode fact normalization
+
+**Status:** accepted
+**Decision:** `runRagEval` gates `allPassed` on retrieval alone when no answerer is supplied (`--retrieval-only`), and on hits + answers + facts for a full run. Fact checks normalize typographic hyphens/dashes (`U+2010–U+2015`, `U+2212`, soft hyphen), non-breaking spaces, and curly quotes to ASCII before matching; dataset facts accept singular/plural and hyphen variants (e.g. `30[\s-]*minute`).
+**Why:** The retrieval-only runner previously exited 1 despite 10/10 hits, and correct answers such as `12‑month` (non-breaking hyphen) or `30‑minute window` failed deterministic checks. The eval must measure correctness, not typography.
+**Alternatives:** loosen facts to bare numbers (rejected: loses the unit/deadline check); strip all punctuation (rejected: `$5.95` must stay intact); only run the full eval (rejected: retrieval regressions should be cheap to check without model spend).
+
+## 2026-11-25 — Chroma verification without Docker
+
+**Status:** accepted (environment note)
+**Decision:** Final Phase 3 evidence was produced with a local `chromadb==1.5.9` server on `127.0.0.1:8000` because the Docker daemon was not available in the session. The pinned `chromadb/chroma:1.5.9` compose service, collection metadata, and client contract are unchanged.
+**Why:** The RAG gate needs a real index; hiding the environment limitation would leave the calibration unverifiable. The server version matches the pinned image, and the index was rebuilt from `content/policies` with `pnpm rag:ingest` (52 chunks, 7 sources).
+**Alternatives:** skip the live eval (rejected: the phase gate explicitly requires a reported hit rate); mock retrieval (rejected: would not validate distances or the real Chroma API).

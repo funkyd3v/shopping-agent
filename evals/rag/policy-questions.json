@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "shipping-standard-cost",
+      "question": "How much does standard shipping cost, and when is it free?",
+      "expected": [{ "source": "shipping.md", "section": "Shipping methods and rates" }],
+      "facts": ["\\$5\\.95", "\\$50\\.00"]
+    },
+    {
+      "id": "shipping-delivery-time",
+      "question": "How long does standard shipping take to arrive?",
+      "expected": [
+        { "source": "shipping.md", "section": "Shipping methods and rates" },
+        { "source": "faq.md", "section": "Shipping" }
+      ],
+      "facts": ["3\\s*[-–—]\\s*5\\s*business days", "1[\\s-]*business[\\s-]+day"]
+    },
+    {
+      "id": "returns-window",
+      "question": "What is the return window for most items?",
+      "expected": [
+        { "source": "returns.md", "section": "Return window" },
+        { "source": "faq.md", "section": "Returns and refunds" }
+      ],
+      "facts": ["30\\s*calendar days"]
+    },
+    {
+      "id": "refund-timing",
+      "question": "How long does a refund take after the returned item is inspected?",
+      "expected": [
+        { "source": "returns.md", "section": "Refund timing" },
+        { "source": "faq.md", "section": "Returns and refunds" }
+      ],
+      "facts": ["5\\s*[-–—]\\s*7\\s*business days", "3\\s*[-–—]\\s*5\\s*business days"]
+    },
+    {
+      "id": "warranty-coverage",
+      "question": "What does the standard warranty cover?",
+      "expected": [
+        { "source": "warranty.md", "section": "Standard coverage" },
+        { "source": "faq.md", "section": "Products and support" }
+      ],
+      "facts": ["12[\\s-]*month", "manufacturing defects"]
+    },
+    {
+      "id": "payment-methods",
+      "question": "Which payment methods do you accept?",
+      "expected": [
+        { "source": "payment-methods.md", "section": "Accepted payment methods" },
+        { "source": "faq.md", "section": "Payments" }
+      ],
+      "facts": ["Visa", "Mastercard", "PayPal"]
+    },
+    {
+      "id": "privacy-chat-retention",
+      "question": "How long do you keep chat transcripts?",
+      "expected": [{ "source": "privacy.md", "section": "Retention" }],
+      "facts": ["12\\s*months"]
+    },
+    {
+      "id": "cancellation-window",
+      "question": "Can I cancel an order after 30 minutes?",
+      "expected": [
+        { "source": "cancellation.md", "section": "Cancellation window" },
+        { "source": "faq.md", "section": "Orders" }
+      ],
+      "facts": ["30[\\s-]*minute", "ship(?:s|ped)"]
+    },
+    {
+      "id": "order-limits",
+      "question": "How much can I order at once?",
+      "expected": [
+        { "source": "faq.md", "section": "Orders" },
+        { "source": "faq.md", "section": "Key numbers at a glance" }
+      ],
+      "facts": ["\\$200\\.00", "5\\s*units"]
+    },
+    {
+      "id": "canada-shipping",
+      "question": "Do you ship to Canada, and how long does it take?",
+      "expected": [
+        { "source": "shipping.md", "section": "International orders" },
+        { "source": "faq.md", "section": "Shipping" },
+        { "source": "shipping.md", "section": "Shipping methods and rates" }
+      ],
+      "facts": ["Canada", "5\\s*[-–—]\\s*7\\s*business days"]
+    }
+  ],
+  "outOfScope": [
+    {
+      "id": "product-recommendation",
+      "question": "Which wireless headphones are best for running?"
+    },
+    {
+      "id": "cart-action",
+      "question": "Add two of the cheapest monitors to my cart."
+    }
+  ],
+  "noMatch": [
+    {
+      "id": "gift-wrapping",
+      "question": "What is your policy on gift wrapping?"
+    }
+  ]
+}

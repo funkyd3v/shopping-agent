@@ -15,7 +15,8 @@
     "db:reset": "prisma migrate reset --force && prisma db seed",
     "db:seed": "prisma db seed",
     "rag:ingest": "tsx scripts/rag-ingest.ts",
-    "rag:ingest:reset": "tsx scripts/rag-ingest.ts --reset"
+    "rag:ingest:reset": "tsx scripts/rag-ingest.ts --reset",
+    "eval:rag": "tsx scripts/rag-eval.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

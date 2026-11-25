@@ -23,6 +23,7 @@
     "db:seed": "pnpm --filter @shopping-agent/api db:seed",
     "rag:ingest": "pnpm --filter @shopping-agent/api rag:ingest",
     "rag:ingest:reset": "pnpm --filter @shopping-agent/api rag:ingest:reset",
+    "eval:rag": "pnpm --filter @shopping-agent/api eval:rag",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"

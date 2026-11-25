@@ -55,6 +55,7 @@ pnpm install
 pnpm docker:up          # Chroma (Docker, localhost-bound)
 pnpm prisma:generate    # Prisma client (output: apps/api/src/generated)
 pnpm dev                # shared watcher + API on :3001
+pnpm eval:rag           # live RAG eval (needs Chroma + provider keys)
 pnpm run ci             # lint → typecheck → unit tests → build
 ```
 
