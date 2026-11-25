@@ -1,7 +1,7 @@
 # Tracker
 
 > Live progress file. Update after every task. If this file disagrees with the code, the code wins — fix this file.
-> Last updated: 2026-11-24
+> Last updated: 2026-11-25
 
 ## Legend
 
@@ -15,9 +15,9 @@
 
 ## Now
 
-- **Phase:** 1 — Foundation ✅ (acceptance gate met)
-- **Next action:** Start Phase 2 — Data and Catalog: full Prisma schema (products, reviews, carts, orders, chat tables, usage/guardrail/run tables), custom SQL migrations for FTS5 + triggers + invariants, deterministic seed, then products/orders REST + pages.
-- **Blockers:** local Docker daemon is stopped; start it for Chroma (`pnpm docker:up`) before `rag:ingest` / the Phase 2 gate.
+- **Phase:** 1 — Foundation ✅ (acceptance gate met; catalog + cart routes delivered early on request)
+- **Next action:** Start Phase 2 — orders/chat/usage tables, full seed fixtures (historical orders, injection/PII reviews), policy docs + `rag:ingest`, then orders REST + `/orders` pages.
+- **Blockers:** the Docker daemon is up, but the Chroma container is **not** running (`docker compose ps` is empty and `127.0.0.1:8000` refuses connections). Run `pnpm docker:up` before `rag:ingest` / the Phase 2 gate.
 - **Open decisions:** embedding model is `gemini-embedding-001` @768 (revisit `gemini-embedding-2` before ingest only if desired); free-tier quotas still unmeasured.
 
 ## Done so far
@@ -25,11 +25,12 @@
 - `PLAN.md` v5 is the approved specification.
 - Context layer exists: `AGENTS.md`, `context/*`, `docs/decisions.md`.
 - Phase 1 scaffold: pnpm workspace, strict TS, Biome, `packages/shared`, NestJS API with env validation, pino, Prisma service, auth (register/login/logout/me), gateway (chains/fallback/breaker/record-replay), Docker Compose for Chroma.
-- **CI pipeline green**: `pnpm run ci` (lint → typecheck → unit tests → build) passes locally; 24 unit tests (6 shared DTO, 2 web form, 16 API: 9 model gateway, 4 migration smoke, 3 exception filter).
+- **CI pipeline green**: `pnpm run ci` (lint → typecheck → unit tests → build) passes locally; 45 unit tests (11 shared DTO/contract, 2 web form, 32 API: 9 model gateway, 7 migration/schema, 3 exception filter, cart/search helpers).
 - **Initial Prisma migration**: `20261124170850_init_user_address` (`users`, `addresses`, unique indexes, cascade FK) + idempotent Phase 1 seed (3 demo users with addresses); `pnpm db:migrate` and `pnpm db:reset` verified on fresh SQLite files.
 - **Web app**: Next.js App Router shell (`/`, `/login`, `/register`), Rubik + Nunito Sans, minimal neutral/violet tokens, zod-backed forms with error summary + address on registration, `/api/*` rewrite to NestJS.
 - **API runtime verified**: `node dist/main.js` boots (root `.env` loaded before zod), auth flows work through the Next rewrite, missing env fails fast, `/gateway/test` without keys returns `PROVIDER_UNAVAILABLE`.
 - **Phase 1 acceptance (live)**: `groq/openai/gpt-oss-20b` served the test call in 1.3s and logged `chain/provider/model/attempt/elapsedMs`; with `PROVIDER_DISABLE=groq` the same call was served by `gemini/gemini-3.5-flash-lite`; explicit `gemini-3.6-flash` also works; a live `gemini-embedding-001` call returned 768 dims.
+- **Phase 1 completion (catalog + cart)**: added `products`, `reviews`, `carts`, `cart_items` + FTS5/triggers migration; deterministic seed (100 products, 673 reviews, demo cart for alice); `GET /products`, `GET /products/:id`, and the full cart REST surface; `/products`, `/products/:id`, `/cart` pages with search/filters, add-to-cart, qty stepper, warnings, and a live header badge. Runtime-verified through the Next proxy.
 - Design system synced to the implemented direction in `design-system/shopping-agent/MASTER.md`.
 
 ## Phase progress
@@ -37,8 +38,8 @@
 | Phase | Status | Acceptance gate (short) | Evidence |
 |---|---|---|---|
 | 0 — Planning | ✅ | PLAN.md v5 approved | `PLAN.md` |
-| 1 — Foundation | ✅ | Gateway test endpoint + fallback + logged call + missing env fails fast + CI green | CI green; 24 tests; live call groq→gemini fallback proven; auth verified end-to-end |
-| 2 — Data and Catalog | ⬜ | Seed + ingest populate DB/Chroma; FTS and filters work; reruns do not duplicate | — |
+| 1 — Foundation | ✅ | Gateway test endpoint + fallback + logged call + missing env fails fast + CI green | CI green; 45 tests; live call groq→gemini fallback proven; auth verified end-to-end |
+| 2 — Data and Catalog | ⬜ | Seed + ingest populate DB/Chroma; FTS and filters work; reruns do not duplicate | Catalog/cart slice done early (100 products, FTS5, cart REST + pages); orders/ingest remain |
 | 3 — RAG Chat | ⬜ | 10 policy questions correct with sources; out-of-scope redirect; no-match answer; hit-rate reported | — |
 | 4 — Read-only Agents | ⬜ | Search/review/history work via `/assistant`; `agent_runs` recorded; retry deduped; concurrent session 409 | — |
 | 5 — Cart | ⬜ | UI + chat cart ops; limits; persistence; cross-user 404; footer | — |
@@ -58,6 +59,15 @@
 - [x] CI skeleton: lint, typecheck, unit, build (green via `pnpm run ci`)
 - [x] `docs/decisions.md` (seeded 2026-11-24, updated 2026-11-25)
 - [x] Acceptance: live gateway call + disabled-provider fallback proof; call logged; missing env fails fast; CI green
+
+### User-requested Phase 1 completion: catalog + cart
+
+- [x] Prisma models + migration for `products`, `reviews`, `carts`, `cart_items`, with FTS5, sync triggers, stock/price/rating/qty invariants
+- [x] Deterministic, idempotent seed: 100 products across 6 categories, 673 reviews, one demo cart for `alice@example.com`
+- [x] `GET /products` (FTS5 search + category/price filters + limit/offset) and `GET /products/:id` (with reviews)
+- [x] Cart REST: `GET /cart`, `POST /cart/items`, `PATCH /cart/items/:productId`, `DELETE /cart/items/:productId`, `DELETE /cart`; qty/line/stock limits; price-change and over-limit warnings
+- [x] Web: `/products` (search/filter/load more), `/products/:id` (detail + reviews), `/cart` (qty stepper, remove, clear, subtotal, warnings, checkout placeholder), header cart badge
+- [x] Runtime verification through the Next `/api/*` proxy: 401 without auth, login → search → detail → cart add/patch/remove/clear all pass
 
 > Evidence: `/gateway/test` served by `groq/openai/gpt-oss-20b`; with `PROVIDER_DISABLE=groq` served by `gemini/gemini-3.5-flash-lite`; explicit `gemini-3.6-flash` works; `gemini-embedding-001` returned 768 dims. Chroma healthcheck still unverified (Docker daemon stopped).
 
