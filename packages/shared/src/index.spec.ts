@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { apiErrorSchema, isErrorCode, registerSchema } from './index.js';
+import {
+  addCartItemSchema,
+  apiErrorSchema,
+  isErrorCode,
+  productListQuerySchema,
+  registerSchema,
+  updateCartItemSchema,
+} from './index.js';
 
 describe('error codes', () => {
   it('accepts known codes', () => {
@@ -54,5 +61,39 @@ describe('register DTO', () => {
 
   it('rejects an invalid email', () => {
     expect(registerSchema.safeParse({ ...valid, email: 'not-an-email' }).success).toBe(false);
+  });
+});
+
+describe('product list query DTO', () => {
+  it('applies defaults and normalizes empty strings', () => {
+    const parsed = productListQuerySchema.parse({ q: '', category: '', limit: '', offset: '' });
+    expect(parsed).toEqual({ q: undefined, category: undefined, limit: 20, offset: 0 });
+  });
+
+  it('coerces dollar filters and paging values', () => {
+    const parsed = productListQuerySchema.parse({ minPrice: '25.5', maxPrice: '80', limit: '10' });
+    expect(parsed.minPrice).toBe(25.5);
+    expect(parsed.maxPrice).toBe(80);
+    expect(parsed.limit).toBe(10);
+  });
+
+  it('rejects an inverted price range and an oversized limit', () => {
+    expect(productListQuerySchema.safeParse({ minPrice: '90', maxPrice: '10' }).success).toBe(
+      false,
+    );
+    expect(productListQuerySchema.safeParse({ limit: '500' }).success).toBe(false);
+  });
+});
+
+describe('cart DTOs', () => {
+  it('defaults add-to-cart quantity to 1 and rejects qty 6', () => {
+    const parsed = addCartItemSchema.parse({ productId: 'p1' });
+    expect(parsed.qty).toBe(1);
+    expect(addCartItemSchema.safeParse({ productId: 'p1', qty: 6 }).success).toBe(false);
+  });
+
+  it('allows qty 0 to remove a line', () => {
+    const parsed = updateCartItemSchema.parse({ qty: 0 });
+    expect(parsed.qty).toBe(0);
   });
 });
