@@ -17,7 +17,7 @@
 
 - **Phase:** 3 — RAG Chat ✅ (closed 2026-11-25; `pnpm run ci` green)
 - **Next action:** start Phase 4 — read-only agents (PLAN §8): LangGraph router + search/review/history + `/assistant`.
-- **Blockers:** none. `/rag/chat` live smoke passed; policy index has 52 chunks.
+- **Blockers:** none. Start Chroma (`pnpm docker:up`) before local `/help` use or `pnpm eval:rag`; the verified index has 52 chunks.
 - **Open decisions:** orders REST is read-only until Phase 6 (cancel moves there); `/assistant` is a 404 until Phase 4, so the RAG out-of-scope copy points at a page that lands next.
 
 ## Done so far
