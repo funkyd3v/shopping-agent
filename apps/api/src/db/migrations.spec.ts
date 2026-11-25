@@ -81,6 +81,54 @@ const insertCartItem = (
   ).run(id, cartId, productId, qty, 8999);
 };
 
+const insertOrder = (
+  db: DatabaseSync,
+  id: string,
+  userId: string,
+  values: {
+    orderNumber?: string;
+    status?: string;
+    source?: string;
+    placedBy?: string;
+    totalCents?: number;
+    idempotencyKey?: string;
+    turnId?: string | null;
+    cancelledAt?: string | null;
+  } = {},
+): void => {
+  db.prepare(
+    `INSERT INTO orders (
+       id, order_number, user_id, status, source, placed_by, total_cents,
+       idempotency_key, address_snapshot_json, turn_id, cancelled_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    values.orderNumber ?? `ORD-${id}`,
+    userId,
+    values.status ?? 'placed',
+    values.source ?? 'direct',
+    values.placedBy ?? 'user',
+    values.totalCents ?? 8999,
+    values.idempotencyKey ?? `key-${id}`,
+    JSON.stringify({ line1: '1 Market Street', city: 'San Francisco' }),
+    values.turnId ?? null,
+    values.cancelledAt ?? null,
+  );
+};
+
+const insertOrderItem = (
+  db: DatabaseSync,
+  id: string,
+  orderId: string,
+  productId: string,
+  qty = 1,
+): void => {
+  db.prepare(
+    `INSERT INTO order_items (id, order_id, product_id, product_name, sku, qty, unit_price_cents)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, orderId, productId, 'Aurora Wireless Headphones', 'SKU-1', qty, 8999);
+};
+
 describe('Prisma migrations — auth models', () => {
   it('apply cleanly to an empty database', () => {
     const db = freshDb();
@@ -218,6 +266,170 @@ describe('Prisma migrations — catalog and cart invariants', () => {
 
       db.prepare('DELETE FROM products WHERE id = ?').run('p1');
       expect(search('"nimbus"*')).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe('Prisma migrations — orders and observability invariants', () => {
+  it('create every Phase 2 table', () => {
+    const db = freshDb();
+    try {
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all() as Array<{ name: string }>;
+      expect(tables.map((table) => table.name)).toEqual(
+        expect.arrayContaining([
+          'orders',
+          'order_items',
+          'chat_sessions',
+          'messages',
+          'token_usage',
+          'guardrail_events',
+          'agent_runs',
+        ]),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('enforce one order per idempotency key and one order per turn per user', () => {
+    const db = freshDb();
+    try {
+      insertUser(db, 'user_1', 'alice@example.com');
+      insertOrder(db, 'o1', 'user_1', { idempotencyKey: 'same', turnId: 'turn_1' });
+      expect(() =>
+        insertOrder(db, 'o2', 'user_1', { idempotencyKey: 'same', turnId: 'turn_2' }),
+      ).toThrow(/UNIQUE/);
+      expect(() =>
+        insertOrder(db, 'o3', 'user_1', { idempotencyKey: 'other', turnId: 'turn_1' }),
+      ).toThrow(/UNIQUE/);
+
+      // Page/seed orders have no turn id and must not collide with each other.
+      insertOrder(db, 'o4', 'user_1', { idempotencyKey: 'seed-1', turnId: null });
+      insertOrder(db, 'o5', 'user_1', { idempotencyKey: 'seed-2', turnId: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('reject invalid order status/source/placed_by and negative totals', () => {
+    const db = freshDb();
+    try {
+      insertUser(db, 'user_1', 'alice@example.com');
+      expect(() => insertOrder(db, 'o1', 'user_1', { status: 'pending' })).toThrow(/invariant/);
+      expect(() => insertOrder(db, 'o2', 'user_1', { source: 'wishlist' })).toThrow(/invariant/);
+      expect(() => insertOrder(db, 'o3', 'user_1', { placedBy: 'robot' })).toThrow(/invariant/);
+      expect(() => insertOrder(db, 'o4', 'user_1', { totalCents: -1 })).toThrow(/invariant/);
+      expect(() =>
+        insertOrder(db, 'o5', 'user_1', { status: 'cancelled', cancelledAt: null }),
+      ).toThrow(/invariant/);
+      insertOrder(db, 'o6', 'user_1', {
+        status: 'cancelled',
+        cancelledAt: '2026-11-25T12:00:00Z',
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('reject non-positive order item quantities and negative unit prices', () => {
+    const db = freshDb();
+    try {
+      insertUser(db, 'user_1', 'alice@example.com');
+      insertProduct(db, 'p1', 'SKU-1');
+      insertOrder(db, 'o1', 'user_1');
+      expect(() => insertOrderItem(db, 'oi0', 'o1', 'p1', 0)).toThrow(/qty/);
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO order_items (id, order_id, product_id, product_name, sku, qty, unit_price_cents)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run('oi2', 'o1', 'p1', 'Aurora', 'SKU-1', 1, -1),
+      ).toThrow(/unit_price_cents/);
+      insertOrderItem(db, 'oi1', 'o1', 'p1', 1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('enforce chat session kind and message role/status/seq uniqueness', () => {
+    const db = freshDb();
+    try {
+      insertUser(db, 'user_1', 'alice@example.com');
+      const insertSession = db.prepare(
+        'INSERT INTO chat_sessions (id, user_id, kind) VALUES (?, ?, ?)',
+      );
+      expect(() => insertSession.run('s0', 'user_1', 'support')).toThrow(/kind/);
+      insertSession.run('s1', 'user_1', 'agent');
+
+      const insertMessage = db.prepare(
+        `INSERT INTO messages (id, session_id, seq, role, content, status, client_message_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      expect(() => insertMessage.run('m0', 's1', 1, 'robot', 'hi', 'complete', null)).toThrow(
+        /invariant/,
+      );
+      expect(() => insertMessage.run('m1', 's1', 1, 'user', 'hi', 'pending', null)).toThrow(
+        /invariant/,
+      );
+      expect(() => insertMessage.run('m2', 's1', 0, 'user', 'hi', 'complete', null)).toThrow(
+        /invariant/,
+      );
+      insertMessage.run('m3', 's1', 1, 'user', 'hi', 'complete', 'client-1');
+      expect(() => insertMessage.run('m4', 's1', 1, 'assistant', 'yo', 'complete', null)).toThrow(
+        /UNIQUE/,
+      );
+      expect(() =>
+        insertMessage.run('m5', 's1', 2, 'assistant', 'yo', 'complete', 'client-1'),
+      ).toThrow(/UNIQUE/);
+      // Multiple null client_message_id values are allowed.
+      insertMessage.run('m6', 's1', 2, 'assistant', 'yo', 'complete', null);
+      insertMessage.run('m7', 's1', 3, 'assistant', 'again', 'complete', null);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('enforce token usage, guardrail, and agent-run invariants', () => {
+    const db = freshDb();
+    try {
+      insertUser(db, 'user_1', 'alice@example.com');
+      const insertUsage = db.prepare(
+        `INSERT INTO token_usage (id, kind, model, provider, input_tokens, output_tokens, latency_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      expect(() => insertUsage.run('u0', 'chat', 'm', 'p', 1, 1, 1)).toThrow(/invariant/);
+      expect(() => insertUsage.run('u1', 'rag', 'm', 'p', -1, 1, 1)).toThrow(/invariant/);
+      insertUsage.run('u2', 'rag', 'm', 'p', 10, 20, 30);
+
+      const insertGuardrail = db.prepare(
+        `INSERT INTO guardrail_events (id, user_id, session_id, rule, action, score, details_json, request_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      expect(() =>
+        insertGuardrail.run('g0', 'user_1', 's1', 'pii', 'redact', 1.5, '{}', 'req-1'),
+      ).toThrow(/invariant/);
+      insertGuardrail.run('g1', 'user_1', 's1', 'pii', 'redact', 0.9, '{}', 'req-1');
+
+      const insertRun = db.prepare(
+        `INSERT INTO agent_runs (
+           id, session_id, turn_id, client_message_id, agent, route, model, provider,
+           prompt_version, duration_ms, status
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      db.prepare('INSERT INTO chat_sessions (id, user_id, kind) VALUES (?, ?, ?)').run(
+        's1',
+        'user_1',
+        'agent',
+      );
+      expect(() =>
+        insertRun.run('r0', 's1', 't1', 'c1', 'search', 'search', 'm', 'p', 'v1', 10, 'done'),
+      ).toThrow(/invariant/);
+      insertRun.run('r1', 's1', 't1', 'c1', 'search', 'search', 'm', 'p', 'v1', 10, 'ok');
     } finally {
       db.close();
     }

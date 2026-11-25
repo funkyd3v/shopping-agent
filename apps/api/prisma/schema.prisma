@@ -1,6 +1,8 @@
 // Prisma 7: schema defines models only; the URL lives in prisma.config.ts.
 // IDs are ULIDs generated in the service layer (PLAN §5).
-// Phase 1 shipped auth models; catalog + cart arrive with the missing routes.
+// Phase 1 shipped auth + catalog/cart; Phase 2 adds orders, chat, usage, and
+// guardrail/run audit tables. Enum-like values and invariants are enforced by
+// triggers in the hand-edited migrations (Prisma/SQLite cannot model them).
 
 generator client {
   provider = "prisma-client"
@@ -19,6 +21,10 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at")
   address      Address?
   cart         Cart?
+  orders       Order[]
+  chatSessions ChatSession[]
+  tokenUsage   TokenUsage[]
+  guardrails   GuardrailEvent[]
 
   @@map("users")
 }
@@ -52,6 +58,7 @@ model Product {
   createdAt   DateTime   @default(now()) @map("created_at")
   reviews     Review[]
   cartItems   CartItem[]
+  orderItems  OrderItem[]
 
   @@index([category])
   @@index([priceCents])
@@ -79,6 +86,7 @@ model Cart {
   updatedAt DateTime   @default(now()) @updatedAt @map("updated_at")
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   items     CartItem[]
+  orders    Order[]
 
   @@map("carts")
 }
@@ -96,4 +104,157 @@ model CartItem {
   @@unique([cartId, productId])
   @@index([productId])
   @@map("cart_items")
+}
+
+// ── Orders (PLAN §5/§9) ──────────────────────────────────────────────────────
+// `order_items` and `address_snapshot_json` are immutable snapshots so order
+// history survives catalog/address changes. Status/source/placed_by are
+// String + zod + triggers (SQLite has no native enums).
+model Order {
+  id                  String      @id
+  orderNumber         String      @unique @map("order_number")
+  userId              String      @map("user_id")
+  status              String
+  source              String
+  placedBy            String      @map("placed_by")
+  totalCents          Int         @map("total_cents")
+  currency            String      @default("USD")
+  idempotencyKey      String      @map("idempotency_key")
+  cartId              String?     @map("cart_id")
+  addressSnapshotJson String      @map("address_snapshot_json")
+  turnId              String?     @map("turn_id")
+  clientMessageId     String?     @map("client_message_id")
+  createdAt           DateTime    @default(now()) @map("created_at")
+  cancellableUntil    DateTime?   @map("cancellable_until")
+  cancelledAt         DateTime?   @map("cancelled_at")
+  cancelledBy         String?     @map("cancelled_by")
+  user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cart                Cart?       @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  items               OrderItem[]
+
+  // Server-derived idempotency (PLAN §9.3): one order per key per user.
+  @@unique([userId, idempotencyKey])
+  // One order per chat turn; null turn_id is allowed for page/seed orders.
+  @@unique([userId, turnId])
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id             String  @id
+  orderId        String  @map("order_id")
+  productId      String  @map("product_id")
+  productName    String  @map("product_name")
+  sku            String
+  qty            Int
+  unitPriceCents Int     @map("unit_price_cents")
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product        Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// ── Chat sessions and messages (PLAN §5/§11) ─────────────────────────────────
+model ChatSession {
+  id         String    @id
+  userId     String    @map("user_id")
+  kind       String // rag | agent
+  title      String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages   Message[]
+  tokenUsage TokenUsage[]
+  agentRuns  AgentRun[]
+
+  @@index([userId, kind, updatedAt])
+  @@map("chat_sessions")
+}
+
+model Message {
+  id              String      @id
+  sessionId       String      @map("session_id")
+  seq             Int
+  role            String // user | assistant | system | tool
+  content         String
+  modelContent    String?     @map("model_content")
+  metadataJson    String?     @map("metadata_json")
+  status          String // complete | error
+  clientMessageId String?     @map("client_message_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  session         ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // Deterministic ordering and retry dedupe (PLAN §5/§11).
+  @@unique([sessionId, seq])
+  @@unique([sessionId, clientMessageId])
+  @@index([sessionId, createdAt])
+  @@map("messages")
+}
+
+// ── Observability tables (PLAN §14) ──────────────────────────────────────────
+// user_id/session_id are nullable for ingestion/system usage.
+model TokenUsage {
+  id           String       @id
+  userId       String?      @map("user_id")
+  sessionId    String?      @map("session_id")
+  runId        String?      @map("run_id")
+  kind         String // router | guardrail | agent | rag | summarizer | embedding
+  model        String
+  provider     String
+  inputTokens  Int          @map("input_tokens")
+  outputTokens Int          @map("output_tokens")
+  estimated    Boolean      @default(false)
+  latencyMs    Int          @map("latency_ms")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  session      ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([provider, createdAt])
+  @@index([runId])
+  @@map("token_usage")
+}
+
+// `details_json` never contains raw PII or prompt text (PLAN §5/§10).
+model GuardrailEvent {
+  id          String   @id
+  userId      String   @map("user_id")
+  sessionId   String   @map("session_id")
+  rule        String
+  action      String
+  score       Float?
+  detailsJson String   @map("details_json")
+  requestId   String   @map("request_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([rule, createdAt])
+  @@map("guardrail_events")
+}
+
+model AgentRun {
+  id              String      @id
+  sessionId       String      @map("session_id")
+  turnId          String      @map("turn_id")
+  clientMessageId String      @map("client_message_id")
+  agent           String
+  route           String
+  model           String
+  provider        String
+  promptVersion   String      @map("prompt_version")
+  toolCallsJson   String      @default("[]") @map("tool_calls_json")
+  durationMs      Int         @map("duration_ms")
+  status          String // ok | error | blocked | limit
+  errorCode       String?     @map("error_code")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  session         ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@index([turnId])
+  @@map("agent_runs")
 }
