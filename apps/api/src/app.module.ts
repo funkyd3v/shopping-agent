@@ -13,6 +13,7 @@ import { PrismaModule } from './db/prisma.module';
 import { HealthController } from './health.controller';
 import { pinoOptions } from './logging/pino.options';
 import { ModelGatewayModule } from './model-gateway/model-gateway.module';
+import { OrdersModule } from './orders/orders.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -32,6 +33,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     CatalogModule,
     CartModule,
+    OrdersModule,
     ModelGatewayModule,
   ],
   controllers: [HealthController],
