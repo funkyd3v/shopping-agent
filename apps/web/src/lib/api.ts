@@ -1,6 +1,9 @@
 import type {
   AddCartItemInput,
   Cart,
+  ChatMessagesResponse,
+  ChatRequest,
+  ChatSessionList,
   LoginInput,
   OrderDetail,
   OrderList,
@@ -137,4 +140,40 @@ export const authApi = {
   me: (signal?: AbortSignal) => request<{ user: PublicUser }>('/api/auth/me', { signal }),
 
   logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
+};
+
+export const chatApi = {
+  sessions: (kind: 'rag' | 'agent', signal?: AbortSignal) =>
+    request<ChatSessionList>(`/api/sessions?kind=${kind}&limit=1`, { signal }),
+
+  messages: (sessionId: string, signal?: AbortSignal) =>
+    request<ChatMessagesResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
+      signal,
+    }),
+
+  /**
+   * POST the turn and return the raw SSE response. Non-2xx bodies are JSON
+   * (validation, auth, or 409) and are surfaced as `ApiError`.
+   */
+  async stream(input: ChatRequest, signal: AbortSignal): Promise<Response> {
+    const response = await fetch('/api/rag/chat', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+      body: JSON.stringify(input),
+      signal,
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as ErrorBody | null;
+      throw new ApiError(
+        data?.message ?? 'Unable to send your question right now. Please try again.',
+        response.status,
+        data?.code ?? 'INTERNAL_ERROR',
+        data?.issues ?? [],
+      );
+    }
+
+    return response;
+  },
 };

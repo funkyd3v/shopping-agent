@@ -18,10 +18,18 @@ const boolish = (defaultValue: boolean) =>
     return v;
   }, z.boolean());
 
-const int = (defaultValue: number, min: number) =>
+const int = (defaultValue: number, min: number, max?: number) =>
   z.preprocess(
     (v) => (v === undefined || v === '' ? defaultValue : v),
-    z.coerce.number().int().min(min),
+    max === undefined
+      ? z.coerce.number().int().min(min)
+      : z.coerce.number().int().min(min).max(max),
+  );
+
+const float = (defaultValue: number, min: number, max: number) =>
+  z.preprocess(
+    (v) => (v === undefined || v === '' ? defaultValue : v),
+    z.coerce.number().min(min).max(max),
   );
 
 const optionalKey = z.preprocess(
@@ -64,6 +72,10 @@ export const envSchema = z.object({
   EMBEDDING_PROVIDER: z.enum(['gemini', 'local']).default('gemini'),
   EMBEDDING_MODEL: z.string().min(1).default('gemini-embedding-001'),
   EMBEDDING_DIM: int(768, 1),
+
+  // RAG retrieval (PLAN §7). Distance is cosine distance: lower is better.
+  RAG_TOP_K: int(5, 1, 10),
+  RAG_MAX_DISTANCE: float(0.38, 0, 2),
 
   // Database
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required (e.g. file:./data/app.db)'),

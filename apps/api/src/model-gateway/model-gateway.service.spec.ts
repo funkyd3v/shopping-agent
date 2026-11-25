@@ -142,4 +142,28 @@ describe('ModelGatewayService', () => {
 
     expect(result.provider).toBe('gemini');
   });
+
+  it('does not call a provider when the request is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const invoke = vi.fn(async () => 'should not run');
+
+    await expect(
+      service(invoke).generate({ chain: 'router', messages, signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('aborts an in-flight call without falling back to another provider', async () => {
+    const controller = new AbortController();
+    const invoke = vi.fn(async () => {
+      controller.abort();
+      return await new Promise<string>(() => undefined);
+    });
+
+    await expect(
+      service(invoke).generate({ chain: 'router', messages, signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
 });

@@ -30,6 +30,8 @@ export interface GatewayRequest {
   /** Require these capabilities from the chosen model. */
   require?: Capability[];
   temperature?: number;
+  /** Abort an in-flight call (client disconnect / Stop button). */
+  signal?: AbortSignal;
   /**
    * Pin a specific provider+model instead of the chain order (used by
    * POST /gateway/test). Still subject to key/breaker checks.
@@ -121,6 +123,9 @@ export class ModelGatewayService {
     let lastError: unknown;
 
     for (let i = 0; i < candidates.length; i++) {
+      if (req.signal?.aborted) {
+        throw new GatewayError('Request aborted', 'ABORTED', 499);
+      }
       const entry = candidates[i] as ModelEntry;
       try {
         const content = await this.invokeWithTimeout(entry, req);
@@ -143,7 +148,9 @@ export class ModelGatewayService {
         this.logger.warn(`gateway fallback: ${entry.provider}/${entry.model} failed (${reason})`);
         if (
           err instanceof GatewayError &&
-          (err.code === 'NO_MODEL_AVAILABLE' || err.code === 'NO_CASSETTE')
+          (err.code === 'NO_MODEL_AVAILABLE' ||
+            err.code === 'NO_CASSETTE' ||
+            err.code === 'ABORTED')
         ) {
           throw err;
         }
@@ -187,6 +194,9 @@ export class ModelGatewayService {
 
   private async invokeWithTimeout(entry: ModelEntry, req: GatewayRequest): Promise<string> {
     const timeoutMs = Number(process.env.MODEL_TIMEOUT_MS ?? 30_000);
+    if (req.signal?.aborted) {
+      throw new GatewayError('Model call aborted', 'ABORTED', 499);
+    }
 
     // Replay mode: serve from cassette before touching any transport.
     // Cassettes only wrap the real transport; an injected test transport
@@ -220,7 +230,12 @@ export class ModelGatewayService {
     };
 
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
     try {
+      const aborted = new Promise<never>((_, reject) => {
+        onAbort = () => reject(new GatewayError('Model call aborted', 'ABORTED', 499));
+        req.signal?.addEventListener('abort', onAbort, { once: true });
+      });
       const content = await Promise.race([
         run(),
         new Promise<never>((_, reject) => {
@@ -229,6 +244,7 @@ export class ModelGatewayService {
             timeoutMs,
           );
         }),
+        aborted,
       ]);
       if (cassetteKey !== null) this.cassettes.save(cassetteKey, content);
       return content;
@@ -241,6 +257,7 @@ export class ModelGatewayService {
       throw new GatewayError(message, 'UPSTREAM_ERROR', 502);
     } finally {
       if (timer) clearTimeout(timer);
+      if (onAbort) req.signal?.removeEventListener('abort', onAbort);
     }
   }
 
@@ -276,7 +293,7 @@ export class ModelGatewayService {
       if (m.role === 'assistant') return new AIMessage(m.content);
       return new HumanMessage(m.content);
     });
-    const result = await llm.invoke(messages);
+    const result = await llm.invoke(messages, { signal: req.signal });
     const text = typeof result.content === 'string' ? result.content : '';
     if (!text) throw new GatewayError('Empty model response', 'UPSTREAM_ERROR', 502);
     return text;

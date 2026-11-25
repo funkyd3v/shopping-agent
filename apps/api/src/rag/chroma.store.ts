@@ -5,6 +5,7 @@ import {
   type Collection,
 } from 'chromadb';
 import type { EmbeddedPolicyChunk, PolicyVectorStore, StoredChunk } from './ingest';
+import type { RetrievedChunk } from './retriever';
 
 export type ChromaPolicyStoreOptions = {
   url: string;
@@ -29,6 +30,7 @@ export class ChromaPolicyStore implements PolicyVectorStore {
   private readonly client: ChromaClient;
   private readonly options: ChromaPolicyStoreOptions;
   private collection: Collection | undefined;
+  private readCollectionCache: Collection | undefined;
 
   constructor(options: ChromaPolicyStoreOptions) {
     this.options = options;
@@ -118,6 +120,46 @@ export class ChromaPolicyStore implements PolicyVectorStore {
     }
   }
 
+  /**
+   * Read-only similarity query (PLAN §7). Returns cosine **distance**:
+   * 0 = identical, 2 = opposite. Callers compare against a max distance.
+   */
+  async query(embedding: number[], nResults: number): Promise<RetrievedChunk[]> {
+    try {
+      const collection = await this.readCollection();
+      const result = await collection.query({
+        queryEmbeddings: [embedding],
+        nResults,
+        include: ['documents', 'metadatas', 'distances'],
+      });
+      const ids = result.ids[0] ?? [];
+      const documents = result.documents[0] ?? [];
+      const metadatas = result.metadatas[0] ?? [];
+      const distances = result.distances[0] ?? [];
+
+      const chunks: RetrievedChunk[] = [];
+      for (const [index, id] of ids.entries()) {
+        const document = documents[index];
+        const distance = distances[index];
+        if (typeof document !== 'string' || typeof distance !== 'number') continue;
+        const metadata = metadatas[index] as Record<string, unknown> | null | undefined;
+        chunks.push({
+          id,
+          source: String(metadata?.source ?? ''),
+          title: String(metadata?.title ?? ''),
+          section: String(metadata?.section ?? ''),
+          content: document,
+          distance,
+        });
+      }
+      return chunks.sort((a, b) => a.distance - b.distance);
+    } catch (error) {
+      // A failed read may be a restarted/renamed collection; re-resolve next time.
+      this.readCollectionCache = undefined;
+      throw error;
+    }
+  }
+
   async reset(): Promise<void> {
     try {
       await this.client.deleteCollection({ name: this.options.collectionName });
@@ -127,6 +169,7 @@ export class ChromaPolicyStore implements PolicyVectorStore {
       }
     }
     this.collection = undefined;
+    this.readCollectionCache = undefined;
   }
 
   async heartbeat(): Promise<void> {
@@ -161,5 +204,14 @@ export class ChromaPolicyStore implements PolicyVectorStore {
       throw new Error('Chroma collection is not initialized; call ensureCollection() first.');
     }
     return this.collection;
+  }
+
+  /** Reuse a read handle, but never create/mutate the collection from a query. */
+  private async readCollection(): Promise<Collection> {
+    if (this.readCollectionCache) return this.readCollectionCache;
+    const collection = await this.client.getCollection({ name: this.options.collectionName });
+    this.assertMetadata(collection);
+    this.readCollectionCache = collection;
+    return collection;
   }
 }

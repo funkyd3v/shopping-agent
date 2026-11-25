@@ -63,6 +63,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 >
                   Orders
                 </Link>
+                <Link
+                  href="/help"
+                  className="inline-flex min-h-11 items-center rounded-md px-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Help
+                </Link>
                 <CartBadge />
               </nav>
             </div>

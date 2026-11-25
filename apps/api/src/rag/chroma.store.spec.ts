@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getOrCreateCollection: vi.fn(),
   deleteCollection: vi.fn(),
   heartbeat: vi.fn(),
+  query: vi.fn(),
 }));
 
 vi.mock('chromadb', () => ({
@@ -46,6 +47,7 @@ const METADATA = {
 const collection = (metadata: Record<string, unknown> = METADATA, count = 52) => ({
   metadata,
   count: async () => count,
+  query: mocks.query,
 });
 
 describe('ChromaPolicyStore.health', () => {
@@ -93,5 +95,80 @@ describe('ChromaPolicyStore.health', () => {
       ssl: false,
       fetchOptions: { signal: expect.any(AbortSignal) },
     });
+  });
+});
+
+describe('ChromaPolicyStore.query', () => {
+  beforeEach(() => {
+    mocks.clientArgs.length = 0;
+    vi.clearAllMocks();
+  });
+
+  it('returns chunks sorted by cosine distance using read-only access', async () => {
+    mocks.getCollection.mockResolvedValue(collection());
+    mocks.query.mockResolvedValue({
+      ids: [['chunk_b', 'chunk_a']],
+      documents: [['FAQ text', 'Shipping text']],
+      metadatas: [
+        [
+          { source: 'faq.md', title: 'FAQ', section: 'Shipping' },
+          { source: 'shipping.md', title: 'Shipping Policy', section: 'Rates' },
+        ],
+      ],
+      distances: [[0.3, 0.1]],
+    });
+
+    const store = new ChromaPolicyStore(OPTIONS);
+    await expect(store.query([0.1, 0.2], 5)).resolves.toEqual([
+      {
+        id: 'chunk_a',
+        source: 'shipping.md',
+        title: 'Shipping Policy',
+        section: 'Rates',
+        content: 'Shipping text',
+        distance: 0.1,
+      },
+      {
+        id: 'chunk_b',
+        source: 'faq.md',
+        title: 'FAQ',
+        section: 'Shipping',
+        content: 'FAQ text',
+        distance: 0.3,
+      },
+    ]);
+    expect(mocks.query).toHaveBeenCalledWith({
+      queryEmbeddings: [[0.1, 0.2]],
+      nResults: 5,
+      include: ['documents', 'metadatas', 'distances'],
+    });
+    expect(mocks.getOrCreateCollection).not.toHaveBeenCalled();
+  });
+
+  it('skips incomplete rows and re-resolves the collection after a failed read', async () => {
+    mocks.getCollection.mockResolvedValue(collection());
+    mocks.query.mockResolvedValueOnce({
+      ids: [['missing_doc', 'missing_distance', 'ok']],
+      documents: [[null, 'doc', 'valid']],
+      metadatas: [[null, null, null]],
+      distances: [[0.1, null, 0.2]],
+    });
+
+    const store = new ChromaPolicyStore(OPTIONS);
+    await expect(store.query([0.1], 3)).resolves.toEqual([
+      { id: 'ok', source: '', title: '', section: '', content: 'valid', distance: 0.2 },
+    ]);
+
+    mocks.query.mockRejectedValueOnce(new Error('collection restarted'));
+    await expect(store.query([0.1], 3)).rejects.toThrow('collection restarted');
+
+    mocks.query.mockResolvedValueOnce({
+      ids: [['ok']],
+      documents: [['valid']],
+      metadatas: [[null]],
+      distances: [[0.2]],
+    });
+    await expect(store.query([0.1], 3)).resolves.toHaveLength(1);
+    expect(mocks.getCollection).toHaveBeenCalledTimes(2);
   });
 });

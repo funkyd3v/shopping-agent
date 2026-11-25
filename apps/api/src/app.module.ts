@@ -5,16 +5,19 @@ import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { ChatModule } from './chat/chat.module';
 import { requestContextMiddleware } from './common/context/request-context';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { originCheckMiddleware } from './common/middleware/origin-check.middleware';
 import { getEnv, validateEnv } from './config/env';
 import { PrismaModule } from './db/prisma.module';
+import { GuardrailsModule } from './guardrails/guardrails.module';
 import { ChromaHealthService } from './health/chroma-health.service';
 import { HealthController } from './health.controller';
 import { pinoOptions } from './logging/pino.options';
 import { ModelGatewayModule } from './model-gateway/model-gateway.module';
 import { OrdersModule } from './orders/orders.module';
+import { RagModule } from './rag/rag.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -36,6 +39,9 @@ import { UsersModule } from './users/users.module';
     CartModule,
     OrdersModule,
     ModelGatewayModule,
+    ChatModule,
+    GuardrailsModule,
+    RagModule,
   ],
   controllers: [HealthController],
   providers: [
