@@ -34,12 +34,12 @@ const order = (id: string, createdAt: string, status = 'placed'): Order =>
 
 class FakePrisma {
   listArgs: unknown;
-  listRows: Order[] = [];
+  listRows: Array<Order & { _count: { items: number } }> = [];
   getArgs: unknown;
   getRow: OrderWithItems | null = null;
 
   readonly order = {
-    findMany: async (args: unknown): Promise<Order[]> => {
+    findMany: async (args: unknown): Promise<Array<Order & { _count: { items: number } }>> => {
       this.listArgs = args;
       return this.listRows;
     },
@@ -58,12 +58,13 @@ describe('OrderService', () => {
   it('returns a page plus a keyset cursor and scopes every query to the user', async () => {
     const prisma = new FakePrisma();
     prisma.listRows = [
-      order('ord_03', '2026-11-25T12:00:00.000Z'),
-      order('ord_02', '2026-11-25T11:00:00.000Z'),
-      order('ord_01', '2026-11-25T10:00:00.000Z'),
+      { ...order('ord_03', '2026-11-25T12:00:00.000Z'), _count: { items: 2 } },
+      { ...order('ord_02', '2026-11-25T11:00:00.000Z'), _count: { items: 1 } },
+      { ...order('ord_01', '2026-11-25T10:00:00.000Z'), _count: { items: 3 } },
     ];
     const result = await serviceWith(prisma).listForUser('user_01', { limit: 2 });
     expect(result.items.map((row) => row.id)).toEqual(['ord_03', 'ord_02']);
+    expect(result.items.map((row) => row.itemCount)).toEqual([2, 1]);
     expect(result.nextCursor).not.toBeNull();
     expect(decodeOrderCursor(result.nextCursor ?? '')).toEqual({
       createdAt: new Date('2026-11-25T11:00:00.000Z'),
@@ -73,6 +74,7 @@ describe('OrderService', () => {
       where: { userId: 'user_01' },
       take: 3,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: { _count: { select: { items: true } } },
     });
   });
 

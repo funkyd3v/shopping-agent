@@ -10,7 +10,13 @@ import type { Order, OrderItem } from '../generated/prisma/client';
 
 export type OrderWithItems = Order & { items: OrderItem[] };
 
-export function toOrderSummary(order: Order, now = Date.now()): OrderSummary {
+export type OrderSummaryOptions = {
+  now?: number;
+  itemCount?: number;
+};
+
+export function toOrderSummary(order: Order, options: OrderSummaryOptions = {}): OrderSummary {
+  const now = options.now ?? Date.now();
   return {
     id: order.id,
     orderNumber: order.orderNumber,
@@ -19,6 +25,7 @@ export function toOrderSummary(order: Order, now = Date.now()): OrderSummary {
     placedBy: orderPlacedBySchema.parse(order.placedBy),
     totalCents: order.totalCents,
     currency: order.currency,
+    itemCount: options.itemCount ?? 0,
     createdAt: order.createdAt.toISOString(),
     cancellableUntil: order.cancellableUntil?.toISOString() ?? null,
     cancellable:
@@ -42,7 +49,7 @@ function parseAddressSnapshot(snapshotJson: string): OrderDetail['address'] {
 
 export function toOrderDetail(order: OrderWithItems): OrderDetail {
   return {
-    ...toOrderSummary(order),
+    ...toOrderSummary(order, { itemCount: order.items.length }),
     items: order.items.map((item) => ({
       id: item.id,
       productId: item.productId,

@@ -86,3 +86,31 @@ ADR-lite log. Append only. Format: date, status, decision, why, alternatives.
 **Decision:** `ModelGatewayService.generate` logs one line per served call with `chain`, `provider`, `model`, `attempt`, and `elapsedMs`.
 **Why:** PLAN §6/§16 requires the Phase 1 test call to be logged with provider and model; previously only fallback warnings were logged.
 **Alternatives:** log only in the controller (rejected: misses direct service use and fallback attempts).
+
+## 2026-11-25 — Phase 2 schema, seed, and migration workflow
+
+**Status:** accepted
+**Decision:** Add the orders/chat/usage/audit tables through a **hand-written** migration (`20261125170000_add_orders_chat_usage`) with `BEFORE INSERT/UPDATE` triggers for enum-like values and invariants. Seed 8 historical orders across `placed/cancelled/shipped/delivered` with fixed timestamps and immutable address/item snapshots, plus 5 fixture reviews (prompt injection, benign-but-suspicious, PII, HTML/markdown injection, safe markdown link). `order_items` are deleted/recreated inside each seed upsert so reruns cannot duplicate lines.
+**Why:** `prisma migrate dev` detects the FTS5 shadow tables as drift and refuses non-interactive runs; triggers are the only SQLite-native way to enforce the enum/positive-quantity/`cancelled_at` invariants, and fixed timestamps keep demos and evals reproducible. Seeded `placed` orders intentionally have expired cancel windows; Phase 6 demos create fresh orders.
+**Alternatives:** `db push` (forbidden by PLAN §18); zod-only validation (rejected: DB must reject invalid rows written by future services); relative seed timestamps (rejected: non-reproducible).
+
+## 2026-11-25 — Policy ingestion and Chroma contract
+
+**Status:** accepted
+**Decision:** Use the official `chromadb@3.5.0` JS client against the pinned `chromadb/chroma:1.5.9` container, always pass embeddings explicitly (`embeddingFunction: null`), and pin `embedding_model`, `embedding_dim`, `chunker_version`, and `hnsw:space=cosine` in collection metadata. The ingest compares chunk ids/content hashes, re-embeds only changed chunks, deletes stale ids, prunes removed sources, and asserts the env matches `EMBEDDING` in `models.config.ts`.
+**Why:** Chroma's default embedding function would silently use a different model/dimension; metadata pinning makes a stale index fail loudly. Hash-based diffing makes `pnpm rag:ingest` idempotent and cheap (verified: first run 52 embedded, second run 0 embedded).
+**Alternatives:** Chroma-side embedding (rejected: hidden model, wasted duplicate work); full re-index on every run (rejected: quota churn and unnecessary writes).
+
+## 2026-11-25 — Orders REST is read-only in Phase 2
+
+**Status:** accepted
+**Decision:** Phase 2 ships `GET /orders` and `GET /orders/:id` only. Listing uses an opaque base64url keyset cursor (`createdAt|id`, newest first), a `status` filter, and includes `itemCount`; all queries are scoped by the authenticated user and another user's order returns **404**. Cancellation, checkout, idempotent placement, and the "AI assistant" badge move to Phase 6.
+**Why:** Phase 2's gate is real data in the database and on the pages; cancel/checkout semantics depend on guardrails and the deterministic intent resolver built later. 404 avoids leaking order existence across users.
+**Alternatives:** offset pagination (rejected: unstable under inserts); exposing `source`/`placedBy` badges now (rejected: plan defers agent-specific UI and the cancel flow).
+
+## 2026-11-25 — Orders pages and date formatting
+
+**Status:** accepted
+**Decision:** `/orders` renders status filter tabs and a "Load more" cursor button; `/orders/:id` shows item snapshots, totals, the address snapshot, and cancellation dates but no cancel button yet. Dates are formatted with `Intl.DateTimeFormat` only in client components after fetch, so the browser locale/time zone applies.
+**Why:** Matches the existing cart/product client-fetch pattern (401 → sign-in panel, skeleton while loading); formatting after hydration avoids SSR/client time-zone mismatches.
+**Alternatives:** server-side rendering of orders (rejected: auth cookie forwarding and per-user caching complexity); relative timestamps (rejected: less precise for support/debugging).

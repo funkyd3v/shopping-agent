@@ -2,6 +2,9 @@ import type {
   AddCartItemInput,
   Cart,
   LoginInput,
+  OrderDetail,
+  OrderList,
+  OrderStatus,
   ProductDetail,
   ProductList,
   PublicUser,
@@ -97,6 +100,25 @@ export const cartApi = {
     }),
 
   clear: () => request<{ cart: Cart }>('/api/cart', { method: 'DELETE' }),
+};
+
+export type OrderQuery = {
+  status?: OrderStatus;
+  limit?: number;
+  cursor?: string;
+};
+
+export const orderApi = {
+  list: (query: OrderQuery = {}) => {
+    const params = new URLSearchParams();
+    if (query.status) params.set('status', query.status);
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.cursor) params.set('cursor', query.cursor);
+    const suffix = params.size > 0 ? `?${params.toString()}` : '';
+    return request<OrderList>(`/api/orders${suffix}`);
+  },
+
+  get: (id: string) => request<OrderDetail>(`/api/orders/${encodeURIComponent(id)}`),
 };
 
 export const authApi = {

@@ -29,13 +29,14 @@ export class OrderService {
       where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: query.limit + 1,
+      include: { _count: { select: { items: true } } },
     });
     const hasMore = rows.length > query.limit;
     const page = hasMore ? rows.slice(0, query.limit) : rows;
     const last = page.at(-1);
 
     return {
-      items: page.map((order) => toOrderSummary(order)),
+      items: page.map((order) => toOrderSummary(order, { itemCount: order._count.items })),
       nextCursor: hasMore && last ? encodeOrderCursor(last) : null,
     };
   }

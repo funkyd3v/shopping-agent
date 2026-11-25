@@ -53,6 +53,7 @@ export const orderSummarySchema = z.object({
   placedBy: orderPlacedBySchema,
   totalCents: z.number().int().nonnegative(),
   currency: z.string().length(3),
+  itemCount: z.number().int().nonnegative(),
   createdAt: z.string(),
   cancellableUntil: z.string().nullable(),
   cancellable: z.boolean(),

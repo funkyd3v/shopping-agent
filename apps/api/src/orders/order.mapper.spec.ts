@@ -41,7 +41,12 @@ const item = {
 
 describe('order mapper', () => {
   it('maps a summary and computes cancellability against the supplied clock', () => {
-    expect(toOrderSummary(baseOrder, new Date('2026-11-25T10:15:00.000Z').getTime())).toEqual({
+    expect(
+      toOrderSummary(baseOrder, {
+        now: new Date('2026-11-25T10:15:00.000Z').getTime(),
+        itemCount: 2,
+      }),
+    ).toEqual({
       id: 'ord_01',
       orderNumber: 'ORD-ABC12',
       status: 'placed',
@@ -49,6 +54,7 @@ describe('order mapper', () => {
       placedBy: 'user',
       totalCents: 1998,
       currency: 'USD',
+      itemCount: 2,
       createdAt: '2026-11-25T10:00:00.000Z',
       cancellableUntil: '2026-11-25T10:30:00.000Z',
       cancellable: true,
@@ -56,7 +62,9 @@ describe('order mapper', () => {
     });
 
     expect(
-      toOrderSummary(baseOrder, new Date('2026-11-25T10:31:00.000Z').getTime()).cancellable,
+      toOrderSummary(baseOrder, {
+        now: new Date('2026-11-25T10:31:00.000Z').getTime(),
+      }).cancellable,
     ).toBe(false);
   });
 
@@ -74,6 +82,7 @@ describe('order mapper', () => {
       },
     ]);
     expect(detail.address.city).toBe('San Francisco');
+    expect(detail.itemCount).toBe(1);
     expect(detail.cartId).toBeNull();
     expect(detail.cancelledBy).toBeNull();
   });
