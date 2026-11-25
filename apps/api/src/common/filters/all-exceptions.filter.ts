@@ -14,6 +14,16 @@ const STATUS_TO_CODE: Record<number, ErrorCode> = {
 };
 
 /**
+ * 5xx codes that are part of the public contract (PLAN §13). Their message is
+ * replaced with a friendly one so provider internals never leak.
+ */
+const SAFE_SERVER_MESSAGES: Partial<Record<ErrorCode, string>> = {
+  PROVIDER_UNAVAILABLE: 'The AI service is temporarily unavailable. Please try again.',
+  BUDGET_EXHAUSTED: 'The usage limit has been reached. Please try again later.',
+  LLM_MODE_NO_CASSETTE: 'This request has no recorded response.',
+};
+
+/**
  * Normalizes every error to the shared envelope `{ code, message, requestId? }`.
  * Internal exception text never reaches the client (PLAN §13).
  */
@@ -49,9 +59,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
       }
 
       if (status >= 500) {
-        // Never leak internal error details.
-        code = 'INTERNAL_ERROR';
-        message = 'Something went wrong. Please try again.';
+        // Never leak internal exception text to the client; keep only contract codes.
+        const safeMessage = SAFE_SERVER_MESSAGES[code];
+        if (!safeMessage) {
+          code = 'INTERNAL_ERROR';
+          message = 'Something went wrong. Please try again.';
+        } else {
+          message = safeMessage;
+        }
         issues = undefined;
       }
     }

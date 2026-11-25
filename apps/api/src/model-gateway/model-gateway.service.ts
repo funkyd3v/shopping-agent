@@ -1,6 +1,6 @@
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import type { CassetteStore } from './cassette.store';
+import { CassetteStore } from './cassette.store';
 import {
   type Capability,
   CHAINS,

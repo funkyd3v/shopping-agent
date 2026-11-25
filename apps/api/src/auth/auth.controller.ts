@@ -10,7 +10,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { clearAuthCookie, setAuthCookie } from './auth.cookies';
-import type { AuthService } from './auth.service';
+import { AuthService } from './auth.service';
 
 @Controller('auth')
 export class AuthController {

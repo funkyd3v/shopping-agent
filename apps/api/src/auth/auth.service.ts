@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
-import type { JwtService } from '@nestjs/jwt';
+import { JwtService } from '@nestjs/jwt';
 import {
   type AddressInput,
   addressSchema,
@@ -10,7 +10,7 @@ import {
 } from '@shopping-agent/shared';
 import * as argon2 from 'argon2';
 import { ulid } from 'ulid';
-import type { PrismaService } from '../db/prisma.service';
+import { PrismaService } from '../db/prisma.service';
 import type { User } from '../generated/prisma/client';
 
 export interface JwtPayload {

@@ -15,7 +15,13 @@ import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    // Load the package-local .env first, then the repo-root .env (Phase 1 keeps
+    // a single root .env; dotenv never overrides values already present).
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env', '../../.env'],
+      validate: validateEnv,
+    }),
     // Lazy so env is read at module init (after validateEnv in main.ts),
     // not at import time.
     LoggerModule.forRootAsync({ useFactory: () => ({ pinoHttp: pinoOptions(getEnv()) }) }),

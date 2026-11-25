@@ -1,12 +1,17 @@
 import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
+import { config as loadDotenv } from 'dotenv';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { getEnv, validateEnv } from './config/env';
 
 async function bootstrap(): Promise<void> {
-  // Fail fast BEFORE any module reads env (PLAN §15/§18).
+  // Fail fast BEFORE any module reads env (PLAN §15/§18). Load the package-local
+  // .env first (if any), then the repo-root .env; existing values are never
+  // overridden. This runs before validateEnv so a bare `node dist/main.js`
+  // behaves the same as `pnpm dev`.
+  loadDotenv({ path: ['.env', '../../.env'], quiet: true });
   validateEnv(process.env as Record<string, unknown>);
   const env = getEnv();
 

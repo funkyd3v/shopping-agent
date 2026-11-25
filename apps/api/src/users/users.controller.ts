@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Patch, UnauthorizedException } from '@nestjs/common';
 import { type AddressInput, addressSchema } from '@shopping-agent/shared';
-import type { AuthService, PublicUser } from '../auth/auth.service';
+import { AuthService, type PublicUser } from '../auth/auth.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 

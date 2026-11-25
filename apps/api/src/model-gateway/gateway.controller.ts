@@ -3,7 +3,7 @@ import type { ErrorCode } from '@shopping-agent/shared';
 import { z } from 'zod';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import { GatewayError, type ModelGatewayService } from './model-gateway.service';
+import { GatewayError, ModelGatewayService } from './model-gateway.service';
 import { gatewayConfigSnapshot } from './models.config';
 
 /** Gateway-internal codes → shared REST error codes (PLAN §13). */
