@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Shopping Agent">
+  <rect width="32" height="32" rx="8" fill="#18181b" />
+  <path d="M10 12h12l-1.2 12H11.2L10 12Z" fill="none" stroke="#fafafa" stroke-width="1.8" stroke-linejoin="round" />
+  <path d="M13 12v-2a3 3 0 0 1 6 0v2" fill="none" stroke="#fafafa" stroke-width="1.8" stroke-linecap="round" />
+</svg>
