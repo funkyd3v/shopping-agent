@@ -2,6 +2,17 @@
 
 **Last updated:** 2026-11-01
 
+## Key numbers at a glance
+
+| Topic | Number |
+|---|---|
+| Maximum order total | $200.00 |
+| Maximum units per item | 5 |
+| Cancellation window | 30 minutes |
+| Standard delivery | 3–5 business days |
+| Return window | 30 days |
+| Warranty | 12 months |
+
 ## Orders
 
 **How much can I order at once?**

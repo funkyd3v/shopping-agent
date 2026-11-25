@@ -21,6 +21,8 @@
     "db:migrate:dev": "pnpm --filter @shopping-agent/api db:migrate:dev",
     "db:reset": "pnpm --filter @shopping-agent/api db:reset",
     "db:seed": "pnpm --filter @shopping-agent/api db:seed",
+    "rag:ingest": "pnpm --filter @shopping-agent/api rag:ingest",
+    "rag:ingest:reset": "pnpm --filter @shopping-agent/api rag:ingest:reset",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
