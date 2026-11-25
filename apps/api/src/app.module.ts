@@ -3,6 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
+import { CartModule } from './cart/cart.module';
+import { CatalogModule } from './catalog/catalog.module';
 import { requestContextMiddleware } from './common/context/request-context';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { originCheckMiddleware } from './common/middleware/origin-check.middleware';
@@ -28,6 +30,8 @@ import { UsersModule } from './users/users.module';
     PrismaModule,
     AuthModule,
     UsersModule,
+    CatalogModule,
+    CartModule,
     ModelGatewayModule,
   ],
   controllers: [HealthController],
