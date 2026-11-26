@@ -5,6 +5,7 @@ import type { Order } from '../generated/prisma/client';
 import { decodeOrderCursor } from './order.cursor';
 import type { OrderWithItems } from './order.mapper';
 import { OrderService } from './order.service';
+import type { OrderWriteService } from './order-write.service';
 
 const order = (id: string, createdAt: string, status = 'placed'): Order =>
   ({
@@ -51,7 +52,7 @@ class FakePrisma {
 }
 
 function serviceWith(prisma: FakePrisma): OrderService {
-  return new OrderService(prisma as unknown as PrismaService);
+  return new OrderService(prisma as unknown as PrismaService, {} as unknown as OrderWriteService);
 }
 
 describe('OrderService', () => {

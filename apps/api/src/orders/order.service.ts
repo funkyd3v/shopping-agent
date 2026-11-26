@@ -4,14 +4,40 @@ import { PrismaService } from '../db/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { decodeOrderCursor, encodeOrderCursor } from './order.cursor';
 import { toOrderDetail, toOrderSummary } from './order.mapper';
+import type { OrderActor, OrderLineInput, OrderWriteService } from './order-write.service';
 
 /**
- * Read-only order access for REST now; Phase 6 extends this service with
- * placement, checkout, and cancellation. Every query is scoped by user id.
+ * Order reads (REST + agent tools) plus direct placement and cancellation.
+ * Every query is scoped by user id; all writes delegate to `OrderWriteService`.
  */
 @Injectable()
 export class OrderService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly write: OrderWriteService,
+  ) {}
+
+  /**
+   * Place an order from explicit items (agent `place_order`). The idempotency
+   * key is derived from the caller's `clientMessageId`, never from the model.
+   */
+  placeDirect(input: {
+    actor: OrderActor;
+    clientMessageId: string;
+    items: OrderLineInput[];
+  }): Promise<OrderDetail> {
+    return this.write.placeOrder({
+      actor: input.actor,
+      source: 'direct',
+      idempotencyKey: `direct:${input.clientMessageId}`,
+      loadLines: async () => ({ cartId: null, items: input.items }),
+    });
+  }
+
+  /** Cancel a placed order inside its window; identity comes from `actor`. */
+  cancel(actor: OrderActor, reference: string): Promise<OrderDetail> {
+    return this.write.cancelOrder({ actor, reference });
+  }
 
   async listForUser(userId: string, query: OrderListQuery): Promise<OrderList> {
     const where: Prisma.OrderWhereInput = { userId };

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { addressSchema } from './dto.js';
+import { addressSchema, clientRequestIdSchema } from './dto.js';
 
 /** Enum-like order values (SQLite has no native enums; PLAN §5). */
 export const ORDER_STATUSES = ['placed', 'cancelled', 'shipped', 'delivered'] as const;
@@ -33,6 +33,13 @@ export const orderListQuerySchema = z.object({
 });
 
 export type OrderListQuery = z.infer<typeof orderListQuerySchema>;
+
+/** `POST /cart/checkout` body (PLAN §13). Idempotent per (user, key). */
+export const checkoutRequestSchema = z.object({
+  clientRequestId: clientRequestIdSchema,
+});
+
+export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
 
 export const orderItemSchema = z.object({
   id: z.string(),

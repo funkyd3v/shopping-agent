@@ -47,6 +47,19 @@ export type LoginInput = z.infer<typeof loginSchema>;
 
 export const updateAddressSchema = addressSchema;
 
+/**
+ * Server-derived idempotency input for `POST /cart/checkout` (PLAN §9.3):
+ * the browser generates one value per checkout click and reuses it on retry.
+ */
+export const clientRequestIdSchema = z
+  .string()
+  .trim()
+  .min(8)
+  .max(100)
+  .regex(/^[A-Za-z0-9_-]+$/, 'clientRequestId must be URL-safe');
+
+export type ClientRequestId = z.infer<typeof clientRequestIdSchema>;
+
 /** Safe user shape returned by /auth/me and /users/me (never the hash). */
 export const publicUserSchema = z.object({
   id: z.string(),
