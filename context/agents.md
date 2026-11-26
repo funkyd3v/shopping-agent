@@ -51,8 +51,9 @@ START → input_guardrails → router ─┬→ search ─┐
 - Specialists: ≤4 tools (prefer 3). Checkpointer: separate SQLite DB, thread id `${userId}:${sessionId}`, recursion limit ~25. Max model/tool calls per run.
 - **No confirmation, no interrupts.** Side effects gated by the resolver.
 
-**Implemented (Phase 4, read-only):**
-- Graph: `router` → exactly one of `search` / `review` / `history` / `clarify`; `cart`/`order` routes render page copy until Phase 5/6.
+**Implemented (Phases 4–5):**
+- Graph: `router` → exactly one of `search` / `review` / `cart` / `history` / `clarify`; the `order` route renders page copy until Phase 6.
+- Cart (Phase 5): exactly three tools (`view_cart`, `add_to_cart`, `update_cart_item`) calling `CartService`. `agent.cart.ts` resolves action/product/quantity from the user message; the tool re-runs it and rejects mismatched model args (`NEEDS_CLARIFICATION`/`INTENT_UNRESOLVED`); non-committal language never commits. A server-generated cart footer (lines, qty, unit price, line total, subtotal, `/cart`) is appended per turn.
 - Router confidence `AGENT_ROUTER_MIN_CONFIDENCE=0.55`; below it, a deterministic keyword/pattern heuristic decides, so a provider failure still yields a useful route.
 - Tools call `ProductSearchService` / `OrderService`; no raw SQL, no identity parameters. Outputs are untrusted envelopes with a flag scan and a `maxToolOutputChars` cap.
 - Deterministic fallbacks: search parses query/price/category; history lists 5 orders; review resolves an ordinal/name/id from `lastListedProducts`. The model only writes prose from tool results.
@@ -67,14 +68,14 @@ START → input_guardrails → router ─┬→ search ─┐
 {
   userId, sessionId, turnId, clientMessageId,
   recentMessages: last 12 (redacted),
-  lastListedProducts: [{ id, name, priceCents, rating, position }], // max 10
+  lastListedProducts: [{ id, name, priceCents, rating, position, sku? }], // max 10
   lastCartSummary: { items: [{ productId, name, qty, unitPriceCents }], subtotalCents },
   lastOrder: { id, orderNumber, status, totalCents },
   sessionRiskScore: number
 }
 ```
 
-`lastListedProducts` is written only by search tools; `lastCartSummary` only by cart tools. Raw reviews/descriptions/policy text never enter structured state; they stay in the tool result envelope.
+`lastListedProducts` is written only by search tools; `lastCartSummary` only by cart tools. `cartFooter` is the per-turn footer and resets each turn, while `lastCartSummary` persists for follow-ups. Raw reviews/descriptions/policy text never enter structured state; they stay in the tool result envelope.
 
 ## Capability matrix
 

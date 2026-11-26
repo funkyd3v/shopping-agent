@@ -11,6 +11,7 @@ Source: PLAN.md §9.
 - `update_cart_item` sets qty (0 removes). `view_cart` returns current prices, subtotal, warnings.
 - `price_at_add_cents` drives a "price changed" notice; checkout always uses current prices.
 - Cart mutations are last-write-wins. Whole-turn retries are deduped by `clientMessageId`; individual tool retries are not idempotent (cart edits are reversible).
+- **Implemented (Phase 5):** `/cart` and the cart agent share `CartService`; chat tools are `view_cart`, `add_to_cart`, `update_cart_item`. A deterministic resolver parses the user's own message (ordinals, names, SKUs, ids; quantity from text) before any write, and the tool rejects model arguments that disagree. A cart footer is appended to the reply. Another user's cart/item is inaccessible (404).
 
 ## Cart limits
 

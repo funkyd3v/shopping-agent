@@ -15,10 +15,10 @@
 
 ## Now
 
-- **Phase:** 4 — Read-only Agents ✅ (closed 2026-11-26; `pnpm run ci` green)
-- **Next action:** start Phase 5 — cart (PLAN §9): cart tools + resolver, limits, `/cart` UI integration, cross-user 404.
+- **Phase:** 5 — Cart ✅ (closed 2026-11-26; `pnpm run ci` green)
+- **Next action:** start Phase 6 — order agent and checkout (PLAN §9): `OrderService`/`CheckoutService`, resolver, limits, write mutex, idempotency.
 - **Blockers:** none. Start Chroma (`pnpm docker:up`) before local `/help` use or `pnpm eval:rag`; the verified index has 52 chunks.
-- **Open decisions:** orders REST stays read-only until Phase 6 (cancel moves there); `/assistant` routes cart/order asks to the cart/orders pages with copy until Phase 5/6.
+- **Open decisions:** orders REST stays read-only until Phase 6 (cancel moves there); `/assistant` still routes order asks to page copy until Phase 6.
 
 ## Done so far
 
@@ -28,6 +28,7 @@
 - **Phase 2:** orders/chat/usage/audit schema, 8 historical orders + 5 security/PII fixture reviews, 7 policy documents, idempotent Chroma ingest (`rag:ingest`), read-only orders REST, `/orders` list/detail pages with status filters and cursor pagination, non-fatal `/health/chroma` probe.
 - **Phase 3:** shared SSE/chat contracts, session replay/retry + per-session lock, PII/token-budget/scope guardrails, grounded RAG over Chroma (`/rag/chat`, `/help`), live RAG eval with hit-rate/fact checks, and source footers.
 - **Phase 4:** LangGraph read-only agents (`router` → `search`/`review`/`history`), deterministic fallbacks and product references, server-generated product/order footers, `agent_runs` audit, `/agent/chat` buffered SSE, and the `/assistant` page on a shared chat UI.
+- **Phase 5:** `cart` agent with exactly `view_cart`/`add_to_cart`/`update_cart_item`, deterministic cart resolver (ordinals, SKU/name/id, quantity from the user message, non-committal refusal), shared `CartService` limits, per-turn cart footer, and cart-aware `/assistant` copy.
 
 ## Phase progress
 
@@ -36,43 +37,44 @@
 | 0 — Planning | ✅ | PLAN.md v5 approved | `PLAN.md` |
 | 1 — Foundation | ✅ | Gateway call + fallback logged; missing env fails fast; CI green | 45+ tests; live groq→gemini fallback |
 | 2 — Data and Catalog | ✅ | Seed + ingest populate DB/Chroma; FTS/filters work; reruns do not duplicate | 100 products / 678 reviews / 8 orders; 52 chunks (rerun: 0 embedded); orders REST + pages verified via proxy; `/health/chroma` ok (52 chunks) and 200/unavailable with Chroma paused; CI green |
-| 3 — RAG Chat | ✅ | 10 policy questions correct with sources; out-of-scope redirect; hit-rate reported | 10/10 hit-rate@5; 100% fact pass; scope 2/2; no-match distance 0.410 > 0.38; live `/rag/chat` SSE smoke (answer + sources, follow-up, PII redaction); 140 API tests; CI green |
+| 3 — RAG Chat | ✅ | 10 policy questions correct with sources; out-of-scope redirect; hit-rate reported | 10/10 hit-rate@5; 100% fact pass; scope 2/2; no-match distance 0.410 > 0.38; live `/rag/chat` SSE smoke; 140 API tests; CI green |
 | 4 — Read-only Agents | ✅ | Search/review/history via `/assistant`; `agent_runs` recorded; retry deduped | live search→review→orders (footers with `/products/:id`, `/orders/:id`); replay same `clientMessageId` = same turn; concurrent turn 409; `agent_runs` rows show route/model/tool calls; 181 API + 12 web tests; CI green |
-| 5 — Cart | ⬜ | UI + chat cart ops; limits; persistence; cross-user 404 | — |
+| 5 — Cart | ✅ | UI + chat cart ops; limits; persistence; cross-user 404 | chat add/view/update/remove with cart footer; qty 5 allowed / 6 refused; 20-line cap; out-of-stock refused; cross-user 404; price-change + empty state; 227 API + 12 web tests; CI green |
 | 6 — Order and Checkout | ⬜ | Direct order + cart checkout + all limits + cancel + injection tests | — |
 | 7 — Guardrails, Evals, Polish | ⬜ | Eval targets met; malicious review cannot order; demo script; CI green | — |
 
+## Phase 5 checklist
+
+- [x] Cart agent route (`cart`) with exactly three tools: `view_cart`, `add_to_cart`, `update_cart_item`; identity injected from request context
+- [x] Deterministic `agent.cart.ts` resolver: commit verbs, non-committal refusal, ordinal/name/SKU/id references, quantity from the user message only, qty 0 removes; the tool re-runs it and rejects mismatches (`NEEDS_CLARIFICATION`/`INTENT_UNRESOLVED`)
+- [x] Chat mutations reuse `CartService`: qty 1..5, 20-line cap, stock, price-change warnings, empty cart; cross-user reads/writes stay 404
+- [x] Server-generated cart footer (lines, qty, unit price, line total, subtotal, `/cart`); `cartFooter` is per-turn, `lastCartSummary` persists only after a cart tool
+- [x] Router `agent-router-v2` + cart prompt `agent-cart-v1`; `/assistant` copy/examples mention cart; no agent-specific UI
+- [x] Tests: resolver/quantity helpers, graph add/fallback/non-committal, tool guards, cart service math/limits/stock/404/empty/price-change; `pnpm run ci` green (227 API + 12 web)
+
 ## Phase 4 checklist
 
-- [x] LangGraph router (`agent-router-v1`) with confidence gate + deterministic heuristic fallback; one specialist per turn (`search`/`review`/`history`); cart/order asks get page copy until Phase 5/6
-- [x] Read-only tools via domain services (`ProductSearchService`, `OrderService`): `search_products`, `get_product`, `get_reviews`, `list_orders`, `get_order`; identity injected from context; zod-validated args; `{ trust: 'untrusted', source, data }` envelopes, flag scan, output caps
-- [x] Bounded structured state + SQLite checkpointer (`CHECKPOINT_DATABASE_PATH`, thread `${userId}:${sessionId}`); deterministic product references (ordinal/name/id) from `lastListedProducts`; per-run model/tool/recursion caps
-- [x] `/agent/chat` buffered SSE: input PII → budget → graph → output sanitize/PII mask → server product/order footers → persist → stream; `(sessionId, clientMessageId)` replay and per-session 409
-- [x] `agent_runs` row per turn (route, model/provider, prompt version, tool-call JSON, status/error, duration) + `token_usage` per model call + `guardrail_events` for PII/tool-output/limits
-- [x] `/assistant` page + shared `ChatPanel` (also powers `/help`), nav link, safe-markdown link renderer; no agent-specific UI; history resume and Stop
-- [x] Live smoke on seeded DB: product search → review follow-up on "the second one" → "show my last orders" with `/orders/:id`; replay dedupe; concurrent request 409; `agent_runs` verified
-- [x] `pnpm run ci` green (lint, typecheck, 181 API tests, 12 web tests, build)
+- [x] LangGraph router (`agent-router-v1`) with confidence gate + deterministic heuristic fallback; one specialist per turn (`search`/`review`/`history`)
+- [x] Read-only tools via domain services (`ProductSearchService`, `OrderService`): `search_products`, `get_product`, `get_reviews`, `list_orders`, `get_order`; identity injected from context; zod-validated args; untrusted envelopes, flag scan, output caps
+- [x] Bounded state + SQLite checkpointer (`CHECKPOINT_DATABASE_PATH`, thread `${userId}:${sessionId}`); deterministic product references from `lastListedProducts`; per-run caps
+- [x] `/agent/chat` buffered SSE: input PII → budget → graph → output sanitize/PII mask → server footers → persist → stream; replay and per-session 409
+- [x] `agent_runs` per turn + `token_usage` per model call + `guardrail_events`; `/assistant` on shared `ChatPanel`; live smoke + CI green
 
 ## Phase 3 checklist
 
 - [x] Shared SSE + chat zod contracts (`packages/shared/events.ts`, `chat.ts`); client parses/validates every frame (partial frames, CRLF, multiple `data:` lines, malformed frames)
 - [x] `ChatSessionService`: per-session lock (409), `clientMessageId` replay/retry, deterministic `seq`, assistant persisted before streaming; `GET /sessions?kind=` and `GET /sessions/:id/messages`
-- [x] RAG chain: input PII redaction → token budget → follow-up condense → scope guard → fixed Gemini query embedding → Chroma top-5 → cosine `maxDistance` → grounded `rag` answer → output sanitation/PII mask → deduplicated `Sources:` → persist → stream
-- [x] Basic guardrails: PII input/output (email/phone/Luhn card), request/session/daily token budgets, scope heuristic + classifier, `guardrail_events` row + log per action; Chroma/embedding/provider failures degrade to friendly copy
-- [x] `/help` page: history resume, example prompts, spinner, Stop, error/auth states, plain-text sources; header Help link
-- [x] `pnpm eval:rag` (live): 10 in-scope questions (retrieval hit-rate + deterministic facts), 2 out-of-scope classifications, 1 no-match; `--retrieval-only` and `--json` modes; typographic-hyphen normalization
-- [x] `pnpm run ci` green (lint, typecheck, 140 API tests, build); live SSE smoke on `/rag/chat` and `/health/chroma` (52 chunks)
+- [x] RAG chain: input PII redaction → token budget → follow-up condense → scope guard → fixed Gemini embedding → Chroma top-5 → distance gate → grounded answer → output sanitation → deduplicated `Sources:` → persist → stream
+- [x] Guardrails: PII input/output (email/phone/Luhn card), request/session/daily token budgets, scope heuristic + classifier, `guardrail_events` row + log per action; Chroma/embedding/provider failures degrade to friendly copy
+- [x] `/help` page + `pnpm eval:rag` (live): 10 in-scope questions, 2 out-of-scope, 1 no-match; `--retrieval-only`/`--json`; CI green
 
 ## Phase 2 checklist
 
 - [x] Prisma models + hand-written migration `20261125170000_add_orders_chat_usage` with enum/invariant triggers, indexes, unique constraints
 - [x] Idempotent seed: 8 historical orders across all statuses with address/item snapshots; 5 injection/PII/HTML fixture reviews (678 reviews total)
-- [x] 7 policy documents in `content/policies/` (shipping, returns, warranty, payment methods, privacy, FAQ, cancellation)
-- [x] `rag:ingest` / `rag:ingest:reset`: markdown-aware chunker, explicit Gemini embeddings @768, Chroma collection metadata pinning, stale-chunk pruning; reruns make zero embedding calls
+- [x] 7 policy documents in `content/policies/`; `rag:ingest`/`rag:ingest:reset` with markdown chunker, explicit Gemini embeddings @768, metadata pinning, stale-chunk pruning; reruns make zero embedding calls
 - [x] `GET /orders` (status filter, opaque keyset cursor, `itemCount`) and `GET /orders/:id`; every query scoped by user; cross-user reads return 404
-- [x] Web `/orders` (filter tabs, load more, empty/auth/error states) and `/orders/:id` (items, totals, address snapshot, cancellation dates); header "Orders" link
-- [x] Chroma health check (non-fatal) surfaced next to DB health: public `GET /health/chroma` (read-only collection/metadata/count probe, 2 s timeout, always 200; `GET /health` stays DB-only)
-- [x] `pnpm run ci` green after Phase 2 (lint, typecheck, 85 tests across workspaces, build); context docs + decisions updated
+- [x] Web `/orders` list/detail pages + nav; non-fatal `GET /health/chroma` probe; CI green
 
 ## Phase 1 checklist (condensed)
 
@@ -80,7 +82,6 @@
 - [x] NestJS API: env validation, pino redaction, Prisma/WAL, auth cookie, guard
 - [x] Model gateway: chains/fallback/breaker/record-replay with served-call logs
 - [x] Next.js shell, login/register, `/api/*` rewrite; CI green; live acceptance proven
-- [x] Catalog + cart delivered early: FTS5 search/filters, detail/reviews, cart REST/pages
 
 ## Session log
 
@@ -91,12 +92,13 @@
 | 2026-11-25 | 1 | Approved model IDs/embeddings, design system sync, API boot fixes, served-call logging | `models.config.ts`, `design-system/**`, `apps/api/src/**` | Phase 2 |
 | 2026-11-25 | 2 | Orders/chat/usage/audit schema + triggers; historical orders and fixture reviews seeded; policy docs | `prisma/**`, `content/policies/**` | Ingest |
 | 2026-11-25 | 2 | Idempotent Chroma policy ingest verified live (7 sources / 52 chunks; rerun 0 embedded) | `apps/api/src/rag/**`, `apps/api/scripts/**` | Orders REST |
-| 2026-11-25 | 2 | Read-only orders REST (cursor, filters, user scoping) and `/orders` pages + nav | `packages/shared/src/orders.ts`, `apps/api/src/orders/**`, `apps/web/**` | Health + CI |
-| 2026-11-25 | 2 | Non-fatal `/health/chroma` probe (read-only, 2 s timeout, metadata assert), docs sync, CI green; Phase 2 closed | `apps/api/src/health/**`, `apps/api/src/rag/chroma.store.ts`, `apps/api/src/health.controller.ts`, `context/*`, `docs/decisions.md` | Phase 3 |
+| 2026-11-25 | 2 | Read-only orders REST (cursor, filters, user scoping) and `/orders` pages + nav; Chroma health probe; CI green; Phase 2 closed | `packages/shared/src/orders.ts`, `apps/api/src/{orders,health}/**`, `apps/web/**` | Phase 3 |
 | 2026-11-25 | 3 | SSE/chat contracts, session lifecycle, guardrails (PII/budget/scope), RAG pipeline + Chroma retriever, `/rag/chat` and `/help` | `packages/shared/src/{chat,events}.ts`, `apps/api/src/{chat,guardrails,rag}/**`, `apps/web/src/{app/help,components/help-chat.tsx,lib/sse.ts}` | Eval |
-| 2026-11-25 | 3 | RAG eval runner + 10-question dataset; calibrated `maxDistance=0.38`; fixed retrieval-only gating and typographic-hyphen facts; live smoke (answer/sources, follow-up, no-match, out-of-scope, PII redaction); CI green; Phase 3 closed | `evals/rag/policy-questions.json`, `apps/api/scripts/rag-eval.ts`, `apps/api/src/rag/eval*.ts`, `context/*`, `docs/decisions.md` | Phase 4 |
+| 2026-11-25 | 3 | RAG eval runner + 10-question dataset; `maxDistance=0.38`; live smoke; CI green; Phase 3 closed | `evals/rag/policy-questions.json`, `apps/api/scripts/rag-eval.ts`, `apps/api/src/rag/eval*.ts`, `context/*`, `docs/decisions.md` | Phase 4 |
 | 2026-11-26 | 4 | LangGraph read-only agents (router + search/review/history), tools, deterministic fallbacks/refs, footers, checkpointer, `agent_runs`, `/agent/chat` SSE | `apps/api/src/agent/**`, `apps/api/src/{app.module.ts,config/env.ts}`, `packages/shared/src/chat.ts` | `/assistant` |
-| 2026-11-26 | 4 | `/assistant` page + shared `ChatPanel` (also `/help`), nav link, safe chat links; live smoke search→review→orders, replay dedupe, concurrent 409, `agent_runs` verified; CI green; Phase 4 closed | `apps/web/src/{app/assistant,components/chat-panel.tsx,components/assistant-chat.tsx,lib/chat-links.ts}`, `context/*`, `docs/decisions.md` | Phase 5 |
+| 2026-11-26 | 4 | `/assistant` page + shared `ChatPanel` (also `/help`), nav link, safe chat links; live smoke; CI green; Phase 4 closed | `apps/web/src/{app/assistant,components/chat-panel.tsx,components/assistant-chat.tsx,lib/chat-links.ts}`, `context/*`, `docs/decisions.md` | Phase 5 |
+| 2026-11-26 | 5 | Cart agent (view/add/update), deterministic resolver + quantity parsing, cart tools/footer, router/prompt bump, `/assistant` copy | `apps/api/src/agent/**`, `apps/api/src/cart/**`, `apps/web/src/{app/assistant,components/assistant-chat.tsx}` | Cart tests |
+| 2026-11-26 | 5 | Cart service tests (math, limits, stock, cross-user 404, price change, empty); CI green; Phase 5 closed | `apps/api/src/cart/cart.service.spec.ts`, `context/*`, `docs/decisions.md` | Phase 6 |
 
 ## Blockers and open questions
 
@@ -104,7 +106,7 @@
 - **Embedding model:** `gemini-embedding-001` @768 is pinned in `models.config.ts`; changing it requires `rag:ingest:reset`.
 - **Cancel window:** 30 minutes is proposed; endpoint and UI land in Phase 6.
 - **Prisma drift:** `prisma migrate dev` sees the FTS5 shadow tables as drift; use hand-written migrations + `prisma migrate deploy`.
-- **Chroma in this environment:** the Docker daemon was unavailable for the final Phase 3 verification, so a local `chromadb==1.5.9` server (same version as the pinned compose image) was used on `127.0.0.1:8000`. The app/config/compose contract is unchanged.
+- **Chroma in this environment:** Docker was unavailable for Phase 3 verification; a local `chromadb==1.5.9` server on `127.0.0.1:8000` was used. The app/config/compose contract is unchanged.
 
 ## Update protocol
 
