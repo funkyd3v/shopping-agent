@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "cart-01",
+      "op": "add",
+      "qty": 1,
+      "lineCount": 0,
+      "existingQty": 0,
+      "stock": 10,
+      "expect": "OK",
+      "expectedQty": 1
+    },
+    {
+      "id": "cart-02",
+      "op": "add",
+      "qty": 5,
+      "lineCount": 0,
+      "existingQty": 0,
+      "stock": 10,
+      "expect": "OK",
+      "expectedQty": 5
+    },
+    {
+      "id": "cart-03",
+      "op": "add",
+      "qty": 6,
+      "lineCount": 0,
+      "existingQty": 0,
+      "stock": 10,
+      "expect": "CART_LIMIT"
+    },
+    {
+      "id": "cart-04",
+      "op": "add",
+      "qty": 0,
+      "lineCount": 0,
+      "existingQty": 0,
+      "stock": 10,
+      "expect": "CART_LIMIT"
+    },
+    {
+      "id": "cart-05",
+      "op": "add",
+      "qty": 1,
+      "lineCount": 20,
+      "existingQty": 0,
+      "stock": 10,
+      "expect": "CART_LIMIT"
+    },
+    {
+      "id": "cart-06",
+      "op": "add",
+      "qty": 1,
+      "lineCount": 19,
+      "existingQty": 0,
+      "stock": 10,
+      "expect": "OK",
+      "expectedQty": 1
+    },
+    {
+      "id": "cart-07",
+      "op": "add",
+      "qty": 1,
+      "lineCount": 20,
+      "existingQty": 2,
+      "stock": 10,
+      "expect": "OK",
+      "expectedQty": 3
+    },
+    {
+      "id": "cart-08",
+      "op": "add",
+      "qty": 2,
+      "lineCount": 0,
+      "existingQty": 4,
+      "stock": 5,
+      "expect": "OK",
+      "expectedQty": 5
+    },
+    {
+      "id": "cart-09",
+      "op": "add",
+      "qty": 1,
+      "lineCount": 0,
+      "existingQty": 0,
+      "stock": 0,
+      "expect": "OUT_OF_STOCK"
+    },
+    {
+      "id": "cart-10",
+      "op": "add",
+      "qty": 3,
+      "lineCount": 0,
+      "existingQty": 0,
+      "stock": 2,
+      "expect": "OUT_OF_STOCK"
+    },
+    {
+      "id": "cart-11",
+      "op": "update",
+      "qty": 5,
+      "stock": 10,
+      "expect": "OK",
+      "expectedQty": 5
+    },
+    {
+      "id": "cart-12",
+      "op": "update",
+      "qty": 6,
+      "stock": 10,
+      "expect": "CART_LIMIT"
+    },
+    {
+      "id": "cart-13",
+      "op": "update",
+      "qty": 0,
+      "stock": 0,
+      "expect": "OK",
+      "expectedQty": 0
+    },
+    {
+      "id": "cart-14",
+      "op": "update",
+      "qty": 3,
+      "stock": 2,
+      "expect": "OUT_OF_STOCK"
+    }
+  ]
+}

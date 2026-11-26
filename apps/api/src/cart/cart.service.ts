@@ -14,6 +14,7 @@ import { ulid } from 'ulid';
 import { getEnv } from '../config/env';
 import { PrismaService } from '../db/prisma.service';
 import { buildCartView } from './cart.mapper';
+import { checkAddLimits, checkUpdateLimits } from './cart-limits';
 
 /**
  * DB-backed cart, shared by REST now and agent tools in Phase 5 (PLAN §9.1).
@@ -49,12 +50,6 @@ export class CartService {
   async addItem(userId: string, input: AddCartItemInput): Promise<Cart> {
     this.assertUser(userId);
     const limits = this.limits();
-    if (input.qty < 1 || input.qty > limits.maxQtyPerItem) {
-      throw new BadRequestException({
-        code: 'CART_LIMIT',
-        message: `Quantity must be between 1 and ${limits.maxQtyPerItem}.`,
-      });
-    }
 
     await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.findUnique({ where: { id: input.productId } });
@@ -77,39 +72,30 @@ export class CartService {
       const existing = await tx.cartItem.findUnique({
         where: { cartId_productId: { cartId: cart.id, productId: product.id } },
       });
+      const decision = checkAddLimits({
+        qty: input.qty,
+        lineCount: existing ? 0 : await tx.cartItem.count({ where: { cartId: cart.id } }),
+        existingQty: existing?.qty ?? 0,
+        stock: product.stock,
+        name: product.name,
+        limits,
+      });
+      if (decision.code !== 'OK') {
+        throw new BadRequestException({ code: decision.code, message: decision.message });
+      }
 
-      if (!existing) {
-        const lineCount = await tx.cartItem.count({ where: { cartId: cart.id } });
-        if (lineCount >= limits.maxLines) {
-          throw new BadRequestException({
-            code: 'CART_LIMIT',
-            message: `Your cart already has the maximum of ${limits.maxLines} lines.`,
-          });
-        }
-        if (product.stock < input.qty) {
-          throw new BadRequestException({
-            code: 'OUT_OF_STOCK',
-            message: `Only ${product.stock} of ${product.name} ${product.stock === 1 ? 'is' : 'are'} available.`,
-          });
-        }
+      if (existing) {
+        await tx.cartItem.update({ where: { id: existing.id }, data: { qty: decision.qty } });
+      } else {
         await tx.cartItem.create({
           data: {
             id: ulid(),
             cartId: cart.id,
             productId: product.id,
-            qty: input.qty,
+            qty: decision.qty,
             priceAtAddCents: product.priceCents,
           },
         });
-      } else {
-        const nextQty = Math.min(existing.qty + input.qty, limits.maxQtyPerItem);
-        if (product.stock < nextQty) {
-          throw new BadRequestException({
-            code: 'OUT_OF_STOCK',
-            message: `Only ${product.stock} of ${product.name} ${product.stock === 1 ? 'is' : 'are'} available.`,
-          });
-        }
-        await tx.cartItem.update({ where: { id: existing.id }, data: { qty: nextQty } });
       }
 
       await tx.cart.update({ where: { id: cart.id }, data: { updatedAt: new Date() } });
@@ -121,12 +107,6 @@ export class CartService {
   async updateItem(userId: string, productId: string, input: UpdateCartItemInput): Promise<Cart> {
     this.assertUser(userId);
     const limits = this.limits();
-    if (input.qty > limits.maxQtyPerItem) {
-      throw new BadRequestException({
-        code: 'CART_LIMIT',
-        message: `Quantity must be between 0 and ${limits.maxQtyPerItem}.`,
-      });
-    }
 
     await this.prisma.$transaction(async (tx) => {
       const cart = await tx.cart.findUnique({ where: { userId } });
@@ -146,13 +126,16 @@ export class CartService {
         if (!product) {
           throw new NotFoundException({ code: 'NOT_FOUND', message: 'Product not found.' });
         }
-        if (product.stock < input.qty) {
-          throw new BadRequestException({
-            code: 'OUT_OF_STOCK',
-            message: `Only ${product.stock} of ${product.name} ${product.stock === 1 ? 'is' : 'are'} available.`,
-          });
+        const decision = checkUpdateLimits({
+          qty: input.qty,
+          stock: product.stock,
+          name: product.name,
+          limits,
+        });
+        if (decision.code !== 'OK') {
+          throw new BadRequestException({ code: decision.code, message: decision.message });
         }
-        await tx.cartItem.update({ where: { id: item.id }, data: { qty: input.qty } });
+        await tx.cartItem.update({ where: { id: item.id }, data: { qty: decision.qty } });
       }
 
       await tx.cart.update({ where: { id: cart.id }, data: { updatedAt: new Date() } });

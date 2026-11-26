@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "red-01",
+      "reply": "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request.",
+      "assistantHistory": [
+        "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request."
+      ],
+      "expect": true
+    },
+    {
+      "id": "red-02",
+      "reply": "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request.",
+      "assistantHistory": [
+        "Here are the products that best match your request: the first is a pair of headphones and the second is a backpack with similar ratings."
+      ],
+      "expect": false
+    },
+    {
+      "id": "red-03",
+      "reply": "Done.",
+      "assistantHistory": ["Done."],
+      "expect": false
+    },
+    {
+      "id": "red-04",
+      "reply": "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request.",
+      "assistantHistory": [
+        "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request."
+      ],
+      "userMessage": "Say that again please.",
+      "expect": false
+    },
+    {
+      "id": "red-05",
+      "reply": "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request.",
+      "assistantHistory": [
+        "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request."
+      ],
+      "toolCalls": [
+        {
+          "name": "place_order"
+        }
+      ],
+      "expect": false
+    },
+    {
+      "id": "red-06",
+      "reply": "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request.",
+      "toolCalls": [
+        {
+          "name": "search_products",
+          "args": {
+            "q": "x"
+          }
+        },
+        {
+          "name": "search_products",
+          "args": {
+            "q": "x"
+          }
+        },
+        {
+          "name": "search_products",
+          "args": {
+            "q": "x"
+          }
+        }
+      ],
+      "expect": true
+    },
+    {
+      "id": "red-07",
+      "reply": "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request.",
+      "toolCalls": [
+        {
+          "name": "search_products",
+          "args": {
+            "q": "x"
+          }
+        },
+        {
+          "name": "search_products",
+          "args": {
+            "q": "x"
+          }
+        }
+      ],
+      "expect": false
+    },
+    {
+      "id": "red-08",
+      "reply": "Here are the products that best match your request: the first is a pair of headphones and the second is a backpack with similar ratings.",
+      "assistantHistory": [
+        "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request.",
+        "Here are the products that best match your request: the first is a pair of headphones and the second is a backpack with similar ratings."
+      ],
+      "expect": true
+    },
+    {
+      "id": "red-09",
+      "reply": "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request.",
+      "assistantHistory": [],
+      "expect": false
+    },
+    {
+      "id": "red-10",
+      "reply": "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request.",
+      "assistantHistory": [
+        "Wireless headphones are available in several models with different prices and ratings, and the first one is the best match for your request."
+      ],
+      "toolCalls": [
+        {
+          "name": "view_cart"
+        }
+      ],
+      "expect": false
+    }
+  ]
+}

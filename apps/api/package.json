@@ -16,7 +16,10 @@
     "db:seed": "prisma db seed",
     "rag:ingest": "tsx scripts/rag-ingest.ts",
     "rag:ingest:reset": "tsx scripts/rag-ingest.ts --reset",
-    "eval:rag": "tsx scripts/rag-eval.ts"
+    "eval:rag": "tsx scripts/rag-eval.ts",
+    "eval:guardrails": "tsx scripts/guardrail-eval.ts",
+    "eval:agents": "tsx scripts/agent-eval.ts",
+    "guardrails:inspect": "tsx scripts/guardrail-inspect.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

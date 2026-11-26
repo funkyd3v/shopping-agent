@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "pii-01",
+      "text": "Contact me at jane.doe@example.com please.",
+      "kinds": ["email"],
+      "secrets": ["jane.doe@example.com"]
+    },
+    {
+      "id": "pii-02",
+      "text": "Email bob+tag@sub.example.co.uk about my order.",
+      "kinds": ["email"],
+      "secrets": ["bob+tag@sub.example.co.uk"]
+    },
+    {
+      "id": "pii-03",
+      "text": "My work address is first.last@company.org.",
+      "kinds": ["email"],
+      "secrets": ["first.last@company.org"]
+    },
+    {
+      "id": "pii-04",
+      "text": "Call me at (415) 555-2671.",
+      "kinds": ["phone"],
+      "secrets": ["(415) 555-2671"]
+    },
+    {
+      "id": "pii-05",
+      "text": "Call me at +1 415 555 2671 anytime.",
+      "kinds": ["phone"],
+      "secrets": ["+1 415 555 2671"]
+    },
+    {
+      "id": "pii-06",
+      "text": "My number is 415-555-2671.",
+      "kinds": ["phone"],
+      "secrets": ["415-555-2671"]
+    },
+    {
+      "id": "pii-07",
+      "text": "Reach me at 4155552671.",
+      "kinds": ["phone"],
+      "secrets": ["4155552671"]
+    },
+    {
+      "id": "pii-08",
+      "text": "Call +44 20 7946 0958 for details.",
+      "kinds": ["phone"],
+      "secrets": ["+44 20 7946 0958"]
+    },
+    {
+      "id": "pii-09",
+      "text": "My card is 4111 1111 1111 1111.",
+      "kinds": ["card"],
+      "secrets": ["4111 1111 1111 1111"]
+    },
+    {
+      "id": "pii-10",
+      "text": "Use card 5555555555554444 for the order.",
+      "kinds": ["card"],
+      "secrets": ["5555555555554444"]
+    },
+    {
+      "id": "pii-11",
+      "text": "Card number 378282246310005 expires soon.",
+      "kinds": ["card"],
+      "secrets": ["378282246310005"]
+    },
+    {
+      "id": "pii-12",
+      "text": "Try 4111111111111112 for the payment.",
+      "kinds": ["card"],
+      "secrets": ["4111111111111112"]
+    },
+    {
+      "id": "pii-13",
+      "text": "Email me at jane@example.com and call 415-555-2671.",
+      "kinds": ["email", "phone"],
+      "secrets": ["jane@example.com", "415-555-2671"]
+    },
+    {
+      "id": "pii-14",
+      "text": "Card 4111111111111111 and email jane@example.com.",
+      "kinds": ["card", "email"],
+      "secrets": ["4111111111111111", "jane@example.com"]
+    },
+    {
+      "id": "pii-15",
+      "text": "Two emails: one@example.com and two@example.org.",
+      "kinds": ["email"],
+      "secrets": ["one@example.com", "two@example.org"]
+    },
+    {
+      "id": "pii-16",
+      "text": "Order ORD-ABC123 has 5 items.",
+      "kinds": [],
+      "secrets": []
+    },
+    {
+      "id": "pii-17",
+      "text": "SKU-12345 is in stock.",
+      "kinds": [],
+      "secrets": []
+    },
+    {
+      "id": "pii-18",
+      "text": "Product 42 costs $45.00.",
+      "kinds": [],
+      "secrets": []
+    },
+    {
+      "id": "pii-19",
+      "text": "Serial AX-9988776655 is valid.",
+      "kinds": [],
+      "secrets": []
+    },
+    {
+      "id": "pii-20",
+      "text": "The 2026 model ships in 3 days.",
+      "kinds": [],
+      "secrets": []
+    },
+    {
+      "id": "pii-21",
+      "text": "My zip code is 94105.",
+      "kinds": [],
+      "secrets": []
+    },
+    {
+      "id": "pii-22",
+      "text": "Order ORD-9988776655 is shipped.",
+      "kinds": [],
+      "secrets": []
+    },
+    {
+      "id": "pii-23",
+      "text": "The product id is prod_01abc.",
+      "kinds": [],
+      "secrets": []
+    },
+    {
+      "id": "pii-24",
+      "text": "Price is $19.99 and rating is 4.5.",
+      "kinds": [],
+      "secrets": []
+    },
+    {
+      "id": "pii-25",
+      "text": "SKU-9876543210 is back in stock.",
+      "kinds": [],
+      "secrets": []
+    }
+  ]
+}

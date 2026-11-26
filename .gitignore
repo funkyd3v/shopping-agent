@@ -32,6 +32,9 @@ npm-debug.log*
 pnpm-debug.log*
 yarn-error.log*
 
+# ── Generated eval results ────────────────────────────────────
+evals/results/
+
 # ── Tests and coverage ────────────────────────────────────────
 coverage/
 test-results/
