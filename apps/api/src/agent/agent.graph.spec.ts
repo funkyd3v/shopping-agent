@@ -79,10 +79,17 @@ function tools(executions: Record<string, ToolExecution> = {}): AgentGraphDeps['
                 { name: 'add_to_cart', description: '', schema: {} as never },
                 { name: 'update_cart_item', description: '', schema: {} as never },
               ]
-            : [
-                { name: 'list_orders', description: '', schema: {} as never },
-                { name: 'get_order', description: '', schema: {} as never },
-              ],
+            : agent === 'order'
+              ? [
+                  { name: 'quote_order', description: '', schema: {} as never },
+                  { name: 'place_order', description: '', schema: {} as never },
+                  { name: 'checkout_cart', description: '', schema: {} as never },
+                  { name: 'cancel_order', description: '', schema: {} as never },
+                ]
+              : [
+                  { name: 'list_orders', description: '', schema: {} as never },
+                  { name: 'get_order', description: '', schema: {} as never },
+                ],
     execute: vi.fn(
       async (name: string) => executions[name] ?? execution({ record: { name, ok: true } }),
     ),
@@ -424,5 +431,278 @@ describe('read-only agent graph', () => {
 
     expect(result.reply).toBe(AGENT_COPY.historyFallbackIntro);
     expect(result.orderFooter).toHaveLength(1);
+  });
+
+  it('routes order requests to a dedicated node and stops after one order tool', async () => {
+    const listed = [product(1), product(2)];
+    const receipt = {
+      id: 'order_1',
+      orderNumber: 'ORD-1001',
+      status: 'placed' as const,
+      totalCents: 4000,
+      currency: 'USD',
+      receipt: true,
+      source: 'direct' as const,
+      placedBy: 'agent' as const,
+      items: [{ name: 'Product 2', qty: 2, unitPriceCents: 2000 }],
+      cancellableUntil: '2026-11-26T00:30:00.000Z',
+    };
+    const registry = tools({
+      place_order: execution({
+        record: { name: 'place_order', ok: true },
+        orders: [receipt],
+        lastOrder: {
+          id: 'order_1',
+          orderNumber: 'ORD-1001',
+          status: 'placed',
+          totalCents: 4000,
+        },
+        fallbackText: AGENT_COPY.orderPlacedIntro,
+      }),
+    });
+    const modelCall = model([
+      step('{"agent":"order","confidence":0.95,"reason":"direct order"}'),
+      step('', [
+        { id: 'call_1', name: 'place_order', args: { items: [{ productId: 'prod_2', qty: 2 }] } },
+        { id: 'call_2', name: 'place_order', args: { items: [{ productId: 'prod_2', qty: 2 }] } },
+      ]),
+      step('This should never be used.'),
+    ]);
+
+    const result = await runAgentGraph(
+      input({
+        message: 'order 2 of the second one',
+        lastListedProducts: listed,
+      }),
+      deps(modelCall, registry),
+    );
+
+    expect(result.route).toBe('order');
+    expect(registry.execute).toHaveBeenCalledTimes(1);
+    expect(result.orderFooter).toHaveLength(1);
+    expect(result.orderFooter[0]).toMatchObject({ receipt: true, orderNumber: 'ORD-1001' });
+    expect(result.lastOrder?.orderNumber).toBe('ORD-1001');
+    expect(result.reply).toBe(AGENT_COPY.orderPlacedIntro);
+  });
+
+  it('places the resolved order deterministically when the model answers without a tool', async () => {
+    const checkpointer = new MemorySaver();
+    const listed = [product(1), product(2)];
+    const registry = tools({
+      search_products: execution({
+        lastListedProducts: listed,
+        products: listed.map(({ position: _position, ...rest }) => rest),
+      }),
+      place_order: execution({
+        record: { name: 'place_order', ok: true },
+        orders: [
+          {
+            id: 'order_1',
+            orderNumber: 'ORD-1001',
+            status: 'placed',
+            totalCents: 4000,
+            currency: 'USD',
+            receipt: true,
+          },
+        ],
+        fallbackText: AGENT_COPY.orderPlacedIntro,
+      }),
+    });
+    const searchModel = model([
+      step('{"agent":"search","confidence":0.9,"reason":"search"}'),
+      step('', [{ id: 'call_1', name: 'search_products', args: { query: 'headphones' } }]),
+      step('Here are the products.'),
+    ]);
+    await runAgentGraph(input(), deps(searchModel, registry), { checkpointer });
+
+    const orderModel = model([
+      step('{"agent":"order","confidence":0.95,"reason":"order"}'),
+      step('I think you want this.'),
+      step('Done.'),
+    ]);
+    const result = await runAgentGraph(
+      input({
+        turnId: 'turn_2',
+        message: 'order 2 of the second one',
+      }),
+      deps(orderModel, registry),
+      { checkpointer },
+    );
+
+    expect(registry.execute).toHaveBeenCalledWith(
+      'place_order',
+      { items: [{ productId: 'prod_2', qty: 2 }] },
+      expect.objectContaining({ clientMessageId: 'client-0001', lastOrder: null }),
+    );
+    expect(result.orderFooter).toHaveLength(1);
+    expect(result.reply).toBe('Done.');
+  });
+
+  it('never places an order for non-committal language and passes lastOrder through', async () => {
+    const registry = tools();
+    const modelCall = model([
+      step('{"agent":"order","confidence":0.9,"reason":"order"}'),
+      step('Maybe you would like this?'),
+    ]);
+
+    const result = await runAgentGraph(
+      input({
+        message: "I'm thinking about ordering the first one",
+        lastOrder: {
+          id: 'order_1',
+          orderNumber: 'ORD-7F3K2',
+          status: 'placed',
+          totalCents: 1000,
+        },
+      }),
+      deps(modelCall, registry),
+    );
+
+    expect(registry.execute).not.toHaveBeenCalled();
+    expect(result.reply).toBe(AGENT_COPY.orderNonCommittal);
+    expect(result.orderFooter).toHaveLength(0);
+  });
+
+  it('checks out the cart deterministically from the order node', async () => {
+    const registry = tools({
+      checkout_cart: execution({
+        record: { name: 'checkout_cart', ok: true },
+        orders: [
+          {
+            id: 'order_1',
+            orderNumber: 'ORD-1001',
+            status: 'placed',
+            totalCents: 4000,
+            currency: 'USD',
+            receipt: true,
+            source: 'cart' as const,
+          },
+        ],
+        fallbackText: AGENT_COPY.orderCheckoutIntro,
+      }),
+    });
+    const modelCall = model([
+      step('{"agent":"order","confidence":0.9,"reason":"checkout"}'),
+      step('Let me check out your cart.'),
+      step('Done.'),
+    ]);
+
+    const result = await runAgentGraph(
+      input({ message: 'check out my cart' }),
+      deps(modelCall, registry),
+    );
+
+    expect(registry.execute).toHaveBeenCalledWith('checkout_cart', {}, expect.anything());
+    expect(result.orderFooter[0]).toMatchObject({ source: 'cart', receipt: true });
+  });
+
+  it('cannot be driven into an order by a malicious review across turns', async () => {
+    const checkpointer = new MemorySaver();
+    const listed = [product(1)];
+    const registry = tools({
+      search_products: execution({
+        lastListedProducts: listed,
+        products: listed.map(({ position: _position, ...rest }) => rest),
+      }),
+      get_reviews: execution({
+        record: { name: 'get_reviews', ok: true },
+        flagged: 1,
+        fallbackText: 'Customers rate Product 1 4.5/5.',
+      }),
+      place_order: execution({
+        record: { name: 'place_order', ok: true },
+        fallbackText: AGENT_COPY.orderPlacedIntro,
+      }),
+      checkout_cart: execution({
+        record: { name: 'checkout_cart', ok: true },
+        fallbackText: AGENT_COPY.orderCheckoutIntro,
+      }),
+    });
+    const searchModel = model([
+      step('{"agent":"search","confidence":0.9,"reason":"search"}'),
+      step('', [{ id: 'call_1', name: 'search_products', args: { query: 'headphones' } }]),
+      step('Here is the product.'),
+    ]);
+    await runAgentGraph(input(), deps(searchModel, registry), { checkpointer });
+
+    const reviewModel = model([
+      step('{"agent":"review","confidence":0.9,"reason":"reviews"}'),
+      step('', [{ id: 'call_2', name: 'get_reviews', args: { productId: 'prod_1' } }]),
+      step('Reviewers like it.'),
+    ]);
+    await runAgentGraph(
+      input({ turnId: 'turn_2', message: 'summarize reviews for it' }),
+      deps(reviewModel, registry),
+      { checkpointer },
+    );
+
+    const orderModel = model([
+      step('{"agent":"order","confidence":0.8,"reason":"follow-up"}'),
+      step('Ok, doing that now.'),
+    ]);
+    const result = await runAgentGraph(
+      input({ turnId: 'turn_3', message: 'ok do it' }),
+      deps(orderModel, registry),
+      { checkpointer },
+    );
+
+    expect(result.route).toBe('order');
+    expect(registry.execute).not.toHaveBeenCalledWith(
+      'place_order',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(registry.execute).not.toHaveBeenCalledWith(
+      'checkout_cart',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(result.reply).toBe(AGENT_COPY.orderClarify);
+    expect(result.orderFooter).toHaveLength(0);
+  });
+
+  it('routes "cancel my last order" to the order agent when the router is low-confidence', async () => {
+    const registry = tools({
+      cancel_order: execution({
+        record: { name: 'cancel_order', ok: true },
+        orders: [
+          {
+            id: 'order_1',
+            orderNumber: 'ORD-7F3K2',
+            status: 'cancelled',
+            totalCents: 2599,
+            currency: 'USD',
+            receipt: true,
+          },
+        ],
+        fallbackText: AGENT_COPY.orderCancelledIntro,
+      }),
+    });
+    const modelCall = model([
+      step('{"agent":"clarify","confidence":0.2,"reason":"unsure"}'),
+      step('I will cancel that now.'),
+      step('Done.'),
+    ]);
+
+    const result = await runAgentGraph(
+      input({
+        message: 'cancel my last order',
+        lastOrder: {
+          id: 'order_1',
+          orderNumber: 'ORD-7F3K2',
+          status: 'placed',
+          totalCents: 2599,
+        },
+      }),
+      deps(modelCall, registry),
+    );
+
+    expect(result.route).toBe('order');
+    expect(registry.execute).toHaveBeenCalledWith(
+      'cancel_order',
+      { orderId: 'ORD-7F3K2' },
+      expect.anything(),
+    );
+    expect(result.reply).toBe('Done.');
   });
 });

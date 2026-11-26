@@ -2,11 +2,13 @@ import { Annotation, type BaseCheckpointSaver, END, START, StateGraph } from '@l
 import { isTurnAborted } from '../common/turn-abort';
 import type { ChatMessage } from '../model-gateway/model-gateway.service';
 import { parseCartIntent, summaryToListedProducts } from './agent.cart';
+import { parseOrderIntent } from './agent.order';
 import { AGENT_COPY, AGENT_POLICY, AGENT_PROMPT_VERSIONS, type AgentPolicy } from './agent.policy';
 import {
   buildSpecialistContext,
   CART_SYSTEM_PROMPT,
   HISTORY_SYSTEM_PROMPT,
+  ORDER_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
   SEARCH_SYSTEM_PROMPT,
 } from './agent.prompts';
@@ -96,17 +98,22 @@ export function createAgentGraph(deps: AgentGraphDeps, checkpointer?: BaseCheckp
     .addNode('search', (state) => specialistNode('search', state, deps))
     .addNode('review', (state) => specialistNode('review', state, deps))
     .addNode('cart', (state) => specialistNode('cart', state, deps))
+    .addNode('order', (state) => specialistNode('order', state, deps))
     .addNode('history', (state) => specialistNode('history', state, deps))
     .addNode('clarify', (state) => clarifyNode(state))
     .addEdge(START, 'router')
-    .addConditionalEdges(
-      'router',
-      (state): ImplementedAgent => (state.route === 'order' ? 'clarify' : state.route),
-      { search: 'search', review: 'review', cart: 'cart', history: 'history', clarify: 'clarify' },
-    )
+    .addConditionalEdges('router', (state): ImplementedAgent => state.route, {
+      search: 'search',
+      review: 'review',
+      cart: 'cart',
+      order: 'order',
+      history: 'history',
+      clarify: 'clarify',
+    })
     .addEdge('search', END)
     .addEdge('review', END)
     .addEdge('cart', END)
+    .addEdge('order', END)
     .addEdge('history', END)
     .addEdge('clarify', END);
 
@@ -182,11 +189,9 @@ async function routeNode(state: State, deps: AgentGraphDeps): Promise<Partial<St
 
 function clarifyNode(state: State): Partial<State> {
   const reply =
-    state.route === 'order'
-      ? AGENT_COPY.orderNotAvailable
-      : state.routeSource === 'heuristic' && state.routeConfidence <= 0.5
-        ? AGENT_COPY.offTopic
-        : AGENT_COPY.clarify;
+    state.routeSource === 'heuristic' && state.routeConfidence <= 0.5
+      ? AGENT_COPY.offTopic
+      : AGENT_COPY.clarify;
 
   return {
     reply,
@@ -241,8 +246,10 @@ async function specialistNode(
     userId: state.userId,
     sessionId: state.sessionId,
     turnId: state.turnId,
+    clientMessageId: state.clientMessageId,
     message: state.message,
     lastListedProducts: state.lastListedProducts,
+    lastOrder: state.lastOrder,
   };
 
   let model = state.model;
@@ -251,6 +258,8 @@ async function specialistNode(
   let toolCalls = 0;
   let executedTool = false;
   let modelFailed = false;
+  /** An order mutation happens at most once per turn (PLAN §9.4). */
+  let orderMutationDone = false;
   let reply = '';
 
   while (modelCalls < policy.maxModelCallsPerRun) {
@@ -311,7 +320,15 @@ async function specialistNode(
           name: call.name,
           content: execution.message,
         });
+        if (orderMutation(call.name)) {
+          // Stop after the single order action and use the server's wording.
+          // The write service also enforces one order per turn via DB constraint.
+          orderMutationDone = true;
+          reply = execution.fallbackText ?? '';
+          break;
+        }
       }
+      if (orderMutationDone) break;
       continue;
     }
 
@@ -446,6 +463,43 @@ async function deterministicFallback(
     return { name, args, execution: await deps.tools.execute(name, args, context) };
   }
 
+  if (agent === 'order') {
+    const intent = parseOrderIntent(state.message, state.lastListedProducts, state.lastOrder);
+    if ('needsClarification' in intent) return { terminal: intent.question };
+    if (intent.action === 'quote') {
+      const args = {
+        ...(intent.items.length > 0 ? { items: intent.items } : {}),
+        fromCart: intent.fromCart,
+      };
+      return {
+        name: 'quote_order',
+        args,
+        execution: await deps.tools.execute('quote_order', args, context),
+      };
+    }
+    if (intent.action === 'checkout') {
+      return {
+        name: 'checkout_cart',
+        args: {},
+        execution: await deps.tools.execute('checkout_cart', {}, context),
+      };
+    }
+    if (intent.action === 'cancel') {
+      const args = { orderId: intent.reference };
+      return {
+        name: 'cancel_order',
+        args,
+        execution: await deps.tools.execute('cancel_order', args, context),
+      };
+    }
+    const args = { items: intent.items };
+    return {
+      name: 'place_order',
+      args,
+      execution: await deps.tools.execute('place_order', args, context),
+    };
+  }
+
   const reference = resolveProductReference(state.message, state.lastListedProducts);
   if (!reference) {
     return {
@@ -475,6 +529,11 @@ function defaultReply(agent: ImplementedAgent, accumulator: ToolAccumulator): st
     return accumulator.cartSummary && accumulator.cartSummary.items.length > 0
       ? AGENT_COPY.cartFallbackIntro
       : AGENT_COPY.cartEmpty;
+  }
+  if (agent === 'order') {
+    return accumulator.orders.length === 0
+      ? AGENT_COPY.orderClarify
+      : AGENT_COPY.orderFallbackIntro;
   }
   if (agent === 'history') {
     return accumulator.orders.length === 0 ? AGENT_COPY.noOrders : AGENT_COPY.historyFallbackIntro;
@@ -529,7 +588,12 @@ function systemPrompt(agent: ImplementedAgent): string {
   if (agent === 'search') return SEARCH_SYSTEM_PROMPT;
   if (agent === 'review') return REVIEW_SYSTEM_PROMPT;
   if (agent === 'cart') return CART_SYSTEM_PROMPT;
+  if (agent === 'order') return ORDER_SYSTEM_PROMPT;
   return HISTORY_SYSTEM_PROMPT;
+}
+
+function orderMutation(name: string): boolean {
+  return name === 'place_order' || name === 'checkout_cart' || name === 'cancel_order';
 }
 
 function buildSpecialistUserMessage(

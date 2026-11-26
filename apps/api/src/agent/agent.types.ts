@@ -4,8 +4,8 @@ import type { GatewayToolCall } from '../model-gateway/model-gateway.service';
 export const AGENT_ROUTES = ['search', 'review', 'cart', 'order', 'history', 'clarify'] as const;
 export type AgentRoute = (typeof AGENT_ROUTES)[number];
 
-/** Phase 5 implements cart; the order node arrives in Phase 6. */
-export type ImplementedAgent = 'search' | 'review' | 'cart' | 'history' | 'clarify';
+/** Agents wired into the graph (PLAN §8.3). */
+export type ImplementedAgent = 'search' | 'review' | 'cart' | 'order' | 'history' | 'clarify';
 
 export type RouteSource = 'model' | 'heuristic' | 'fallback';
 
@@ -56,6 +56,14 @@ export type OrderFooterItem = {
   status: string;
   totalCents: number;
   currency: string;
+  /** History rows use the compact list; order tools set `receipt` for full detail. */
+  receipt?: boolean;
+  source?: 'direct' | 'cart';
+  placedBy?: 'user' | 'agent';
+  items?: Array<{ name: string; qty: number; unitPriceCents: number }>;
+  cancellableUntil?: string | null;
+  cancelledAt?: string | null;
+  cancelledBy?: 'user' | 'agent' | null;
 };
 
 /** Full LangGraph state, checkpointed per `${userId}:${sessionId}`. */
@@ -109,7 +117,14 @@ export type AgentGraphInput = Pick<
   | 'model'
   | 'provider'
   | 'promptVersion'
->;
+> &
+  /** Normally restored by the checkpointer; explicit values are useful in tests. */
+  Partial<
+    Pick<
+      AgentGraphState,
+      'lastListedProducts' | 'lastCartSummary' | 'lastOrder' | 'sessionRiskScore'
+    >
+  >;
 
 export type AgentGraphOutput = AgentGraphState;
 

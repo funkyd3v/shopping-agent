@@ -1,15 +1,30 @@
 import { HttpException, Injectable, Logger } from '@nestjs/common';
-import { type Cart, ORDER_STATUSES, type OrderStatus } from '@shopping-agent/shared';
+import {
+  type Cart,
+  ORDER_STATUSES,
+  type OrderDetail,
+  type OrderStatus,
+} from '@shopping-agent/shared';
 import { z } from 'zod';
 import { CartService } from '../cart/cart.service';
 import { ProductSearchService, type ReviewSort } from '../catalog/product-search.service';
+import { formatUsd } from '../common/money';
+import { CheckoutService } from '../orders/checkout.service';
 import { OrderService } from '../orders/order.service';
+import type { OrderRefusal } from '../orders/order-limits';
+import { OrderRefusalError } from '../orders/order-write.service';
 import {
   type CartIntent,
   cartToListedProducts,
   cartToSummary,
   parseCartIntent,
 } from './agent.cart';
+import {
+  type OrderClarification,
+  type OrderIntent,
+  type OrderLine,
+  parseOrderIntent,
+} from './agent.order';
 import { AGENT_COPY, AGENT_POLICY } from './agent.policy';
 import type {
   AgentRoute,
@@ -32,8 +47,11 @@ export type ToolContext = {
   userId: string;
   sessionId: string;
   turnId: string;
+  /** Server-derived from the authenticated turn; never supplied by the model. */
+  clientMessageId: string;
   message: string;
   lastListedProducts: ListedProduct[];
+  lastOrder: LastOrder;
 };
 
 export type ToolExecution = {
@@ -93,6 +111,26 @@ const updateCartItemSchema = z.object({
   qty: z.number().int().min(0).max(5),
 });
 
+const orderItemSchema = z.object({
+  productId: z.string().trim().min(1).max(64),
+  qty: z.number().int().min(1).max(5),
+});
+
+const quoteOrderSchema = z.object({
+  items: z.array(orderItemSchema).min(1).max(10).optional(),
+  fromCart: z.boolean().optional(),
+});
+
+const placeOrderSchema = z.object({
+  items: z.array(orderItemSchema).min(1).max(10),
+});
+
+const checkoutCartSchema = z.object({});
+
+const cancelOrderSchema = z.object({
+  orderId: z.string().trim().min(1).max(100),
+});
+
 const SPECS: Record<string, AgentToolSpec> = {
   search_products: {
     name: 'search_products',
@@ -142,11 +180,41 @@ const SPECS: Record<string, AgentToolSpec> = {
       'Set the quantity of a product already in the cart, by exact product id. qty 0 removes the line. Enforces the per-item quantity limit.',
     schema: updateCartItemSchema,
   },
+  quote_order: {
+    name: 'quote_order',
+    description:
+      'Read-only price and availability check. Pass items (product ids from the listed products, qty 1-5) or fromCart: true to check the current cart. Creates nothing.',
+    schema: quoteOrderSchema,
+  },
+  place_order: {
+    name: 'place_order',
+    description:
+      'Place a direct order from explicit items (product ids from the listed products, qty 1-5). No confirmation step: the server verifies the request against the customer message, enforces limits and stock, and returns a receipt or a structured refusal. Does not touch the cart.',
+    schema: placeOrderSchema,
+  },
+  checkout_cart: {
+    name: 'checkout_cart',
+    description:
+      "Turn the authenticated customer's current cart into an order, repricing every line. No confirmation step: the server enforces limits and stock, clears the cart on success, and returns a receipt or a structured refusal.",
+    schema: checkoutCartSchema,
+  },
+  cancel_order: {
+    name: 'cancel_order',
+    description:
+      'Cancel a placed order by its order number (ORD-…). Allowed only inside the cancellation window; items are restocked. Idempotent for an already-cancelled order.',
+    schema: cancelOrderSchema,
+  },
 };
 
 const SEARCH_TOOLS = [SPECS.search_products, SPECS.get_product] as AgentToolSpec[];
 const REVIEW_TOOLS = [SPECS.get_reviews] as AgentToolSpec[];
 const CART_TOOLS = [SPECS.view_cart, SPECS.add_to_cart, SPECS.update_cart_item] as AgentToolSpec[];
+const ORDER_TOOLS = [
+  SPECS.quote_order,
+  SPECS.place_order,
+  SPECS.checkout_cart,
+  SPECS.cancel_order,
+] as AgentToolSpec[];
 const HISTORY_TOOLS = [SPECS.list_orders, SPECS.get_order] as AgentToolSpec[];
 
 /**
@@ -162,12 +230,14 @@ export class AgentToolRegistry {
     private readonly products: ProductSearchService,
     private readonly orders: OrderService,
     private readonly cart: CartService,
+    private readonly checkout: CheckoutService,
   ) {}
 
   specsFor(agent: AgentRoute): AgentToolSpec[] {
     if (agent === 'search') return SEARCH_TOOLS;
     if (agent === 'review') return REVIEW_TOOLS;
     if (agent === 'cart') return CART_TOOLS;
+    if (agent === 'order') return ORDER_TOOLS;
     if (agent === 'history') return HISTORY_TOOLS;
     return [];
   }
@@ -214,6 +284,26 @@ export class AgentToolRegistry {
           const parsed = updateCartItemSchema.safeParse(rawArgs);
           if (!parsed.success) return invalidArguments(name, parsed.error.issues);
           return await this.updateCartItem(ctx, parsed.data);
+        }
+        case 'quote_order': {
+          const parsed = quoteOrderSchema.safeParse(rawArgs ?? {});
+          if (!parsed.success) return invalidArguments(name, parsed.error.issues);
+          return await this.quoteOrder(ctx, parsed.data);
+        }
+        case 'place_order': {
+          const parsed = placeOrderSchema.safeParse(rawArgs);
+          if (!parsed.success) return invalidArguments(name, parsed.error.issues);
+          return await this.placeOrder(ctx, parsed.data);
+        }
+        case 'checkout_cart': {
+          const parsed = checkoutCartSchema.safeParse(rawArgs ?? {});
+          if (!parsed.success) return invalidArguments(name, parsed.error.issues);
+          return await this.checkoutCart(ctx);
+        }
+        case 'cancel_order': {
+          const parsed = cancelOrderSchema.safeParse(rawArgs);
+          if (!parsed.success) return invalidArguments(name, parsed.error.issues);
+          return await this.cancelOrder(ctx, parsed.data.orderId);
         }
         default:
           return errorResult(name, 'UNKNOWN_TOOL', 'That tool is not available.');
@@ -567,24 +657,222 @@ export class AgentToolRegistry {
     return null;
   }
 
+  // ── order tools (PLAN §8.4, §9.3–§9.6) ────────────────────────────────────
+
+  private async quoteOrder(
+    ctx: ToolContext,
+    args: { items?: OrderLine[]; fromCart?: boolean },
+  ): Promise<ToolExecution> {
+    const intent = parseOrderIntent(ctx.message, ctx.lastListedProducts, ctx.lastOrder);
+    const guard = this.guardOrder('quote_order', intent, (resolved) => {
+      if (resolved.action !== 'quote') return false;
+      const fromCart = args.fromCart ?? false;
+      const items = args.items ?? [];
+      return resolved.fromCart === fromCart && sameItems(resolved.items, items);
+    });
+    if (guard) return guard;
+
+    const quote = await this.orders.quote(
+      this.orderActor(ctx),
+      args.items ?? [],
+      args.fromCart ?? false,
+    );
+    return {
+      record: { name: 'quote_order', ok: true },
+      message: envelope('orders', {
+        quote: {
+          lines: quote.lines.map((line) => ({
+            productId: line.productId,
+            name: line.name,
+            qty: line.qty,
+            unitPriceCents: line.unitPriceCents,
+            lineTotalCents: line.lineTotalCents,
+            stock: line.stock,
+          })),
+          totalCents: quote.totalCents,
+          total: formatUsd(quote.totalCents),
+          ...(quote.refusal ? { refusal: refusalFields(quote.refusal) } : {}),
+        },
+      }),
+      fallbackText:
+        quote.refusal?.message ??
+        `That comes to ${formatUsd(quote.totalCents)} before any order is placed.`,
+    };
+  }
+
+  private async placeOrder(ctx: ToolContext, args: { items: OrderLine[] }): Promise<ToolExecution> {
+    const intent = parseOrderIntent(ctx.message, ctx.lastListedProducts, ctx.lastOrder);
+    const guard = this.guardOrder(
+      'place_order',
+      intent,
+      (resolved) => resolved.action === 'place' && sameItems(resolved.items, args.items),
+    );
+    if (guard) return guard;
+
+    const order = await this.orders.placeDirect({
+      actor: this.orderActor(ctx),
+      clientMessageId: ctx.clientMessageId,
+      items: args.items,
+    });
+    return this.orderResult('place_order', order, AGENT_COPY.orderPlacedIntro);
+  }
+
+  private async checkoutCart(ctx: ToolContext): Promise<ToolExecution> {
+    const intent = parseOrderIntent(ctx.message, ctx.lastListedProducts, ctx.lastOrder);
+    const guard = this.guardOrder(
+      'checkout_cart',
+      intent,
+      (resolved) => resolved.action === 'checkout',
+    );
+    if (guard) return guard;
+
+    const order = await this.checkout.checkout(this.orderActor(ctx), ctx.clientMessageId);
+    return this.orderResult('checkout_cart', order, AGENT_COPY.orderCheckoutIntro);
+  }
+
+  private async cancelOrder(ctx: ToolContext, reference: string): Promise<ToolExecution> {
+    const intent = parseOrderIntent(ctx.message, ctx.lastListedProducts, ctx.lastOrder);
+    const guard = this.guardOrder('cancel_order', intent, (resolved) => {
+      if (resolved.action !== 'cancel') return false;
+      const matchesMessage = reference.trim().toUpperCase() === resolved.reference.toUpperCase();
+      // "cancel it" resolves from `lastOrder`; accept its internal id too.
+      const matchesLastOrder =
+        resolved.reason === 'last order' &&
+        ctx.lastOrder !== null &&
+        reference.trim() === ctx.lastOrder.id;
+      return matchesMessage || matchesLastOrder;
+    });
+    if (guard) return guard;
+
+    const order = await this.orders.cancel(this.orderActor(ctx), reference);
+    return this.orderResult('cancel_order', order, AGENT_COPY.orderCancelledIntro);
+  }
+
+  /** Identity and provenance are injected; the model supplies none of them. */
+  private orderActor(ctx: ToolContext) {
+    return {
+      userId: ctx.userId,
+      placedBy: 'agent' as const,
+      sessionId: ctx.sessionId,
+      turnId: ctx.turnId,
+      clientMessageId: ctx.clientMessageId,
+    };
+  }
+
+  private guardOrder(
+    name: string,
+    intent: OrderIntent,
+    allowed: (intent: Exclude<OrderIntent, OrderClarification>) => boolean,
+  ): ToolExecution | null {
+    if ('needsClarification' in intent) {
+      return {
+        record: { name, ok: false, errorCode: 'NEEDS_CLARIFICATION' },
+        message: envelope('orders', {
+          error: { code: 'NEEDS_CLARIFICATION', message: intent.question },
+        }),
+        fallbackText: intent.question,
+      };
+    }
+    if (!allowed(intent)) return orderIntentUnresolved(name);
+    return null;
+  }
+
+  private orderResult(name: string, order: OrderDetail, fallbackText: string): ToolExecution {
+    const footer: OrderFooterItem = {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      totalCents: order.totalCents,
+      currency: order.currency,
+      source: order.source,
+      placedBy: order.placedBy,
+      items: order.items.map((item) => ({
+        name: item.productName,
+        qty: item.qty,
+        unitPriceCents: item.unitPriceCents,
+      })),
+      cancellableUntil: order.cancellableUntil,
+      cancelledAt: order.cancelledAt,
+      cancelledBy: order.cancelledBy,
+      receipt: true,
+    };
+    return {
+      record: { name, ok: true },
+      message: envelope('orders', {
+        order: {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          source: order.source,
+          placedBy: order.placedBy,
+          totalCents: order.totalCents,
+          total: formatUsd(order.totalCents),
+          cancellable: order.cancellable,
+          cancellableUntil: order.cancellableUntil,
+          cancelledAt: order.cancelledAt,
+          items: order.items.map((item) => ({
+            productName: item.productName,
+            qty: item.qty,
+            unitPriceCents: item.unitPriceCents,
+          })),
+          link: `/orders/${order.id}`,
+        },
+      }),
+      orders: [footer],
+      lastOrder: {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        totalCents: order.totalCents,
+      },
+      fallbackText,
+    };
+  }
+
   private fromError(name: string, error: unknown): ToolExecution {
+    if (error instanceof OrderRefusalError) {
+      return {
+        record: { name, ok: false, errorCode: error.refusal.code },
+        message: envelope('orders', { error: refusalFields(error.refusal) }),
+        fallbackText: error.refusal.message,
+      };
+    }
     if (error instanceof HttpException) {
       const response = error.getResponse();
       const body =
         typeof response === 'string'
           ? { message: response }
-          : (response as { code?: string; message?: string });
+          : (response as {
+              code?: string;
+              message?: string;
+              limit?: number;
+              actual?: number;
+              allowed?: number;
+            });
       const code = body.code ?? 'TOOL_ERROR';
       const message =
-        code === 'NOT_FOUND' && name === 'get_order'
+        code === 'NOT_FOUND' && (name === 'get_order' || isOrderTool(name))
           ? AGENT_COPY.orderNotFound
           : code === 'NOT_FOUND' && name === 'get_product'
             ? AGENT_COPY.productNotFound
             : (body.message ?? 'The tool could not complete that request.');
+      const source = isCartTool(name) ? 'cart' : isOrderTool(name) ? 'orders' : 'tool';
       return {
         record: { name, ok: false, errorCode: code },
-        message: envelope(isCartTool(name) ? 'cart' : 'tool', { error: { code, message } }),
-        ...(isCartTool(name) ? { fallbackText: message } : {}),
+        message: envelope(source, {
+          error: {
+            code,
+            message,
+            ...(isOrderTool(name)
+              ? {
+                  ...(body.limit !== undefined ? { limit: body.limit } : {}),
+                  ...(body.actual !== undefined ? { actual: body.actual } : {}),
+                  ...(body.allowed !== undefined ? { allowed: body.allowed } : {}),
+                }
+              : {}),
+          },
+        }),
+        ...(isCartTool(name) || isOrderTool(name) ? { fallbackText: message } : {}),
       };
     }
     this.logger.warn(
@@ -596,6 +884,51 @@ export class AgentToolRegistry {
 
 function isCartTool(name: string): boolean {
   return name === 'view_cart' || name === 'add_to_cart' || name === 'update_cart_item';
+}
+
+function isOrderTool(name: string): boolean {
+  return (
+    name === 'quote_order' ||
+    name === 'place_order' ||
+    name === 'checkout_cart' ||
+    name === 'cancel_order'
+  );
+}
+
+/** Order-independent comparison of resolved vs. model-supplied lines. */
+function sameItems(left: OrderLine[], right: OrderLine[]): boolean {
+  if (left.length !== right.length) return false;
+  const key = (items: OrderLine[]) =>
+    items
+      .map((item) => `${item.productId}:${item.qty}`)
+      .sort()
+      .join('|');
+  return key(left) === key(right);
+}
+
+/** Structured refusal fields kept in the untrusted envelope for the model. */
+function refusalFields(refusal: OrderRefusal): Record<string, unknown> {
+  return {
+    code: refusal.code,
+    message: refusal.message,
+    ...(refusal.limit !== undefined ? { limit: refusal.limit } : {}),
+    ...(refusal.actual !== undefined ? { actual: refusal.actual } : {}),
+    ...(refusal.allowed !== undefined ? { allowed: refusal.allowed } : {}),
+    ...(refusal.productId ? { productId: refusal.productId } : {}),
+  };
+}
+
+function orderIntentUnresolved(name: string): ToolExecution {
+  return {
+    record: { name, ok: false, errorCode: 'INTENT_UNRESOLVED' },
+    message: envelope('orders', {
+      error: {
+        code: 'INTENT_UNRESOLVED',
+        message: AGENT_COPY.orderIntentUnresolved,
+      },
+    }),
+    fallbackText: AGENT_COPY.orderIntentUnresolved,
+  };
 }
 
 function intentUnresolved(name: string): ToolExecution {

@@ -93,6 +93,67 @@ describe('agent footers', () => {
     expect(footer).toContain('Headphones');
   });
 
+  it('builds a full receipt with items, total, status, deadline, and link', () => {
+    const footer = buildOrderFooter([
+      {
+        id: 'order_1',
+        orderNumber: 'ORD-7F3K2',
+        status: 'placed',
+        totalCents: 15_998,
+        currency: 'USD',
+        receipt: true,
+        source: 'cart',
+        placedBy: 'agent',
+        items: [{ name: 'Wireless Headphones', qty: 2, unitPriceCents: 7999 }],
+        cancellableUntil: '2099-01-01T12:00:00.000Z',
+      },
+    ]);
+
+    expect(footer).toContain('Receipt:');
+    expect(footer).toContain('ORD-7F3K2 — placed by the assistant — from your cart');
+    expect(footer).toContain('1. Wireless Headphones — 2 × $79.99 = $159.98');
+    expect(footer).toContain('Total: $159.98');
+    expect(footer).toContain('Status: placed — cancellable until');
+    expect(footer).toContain('/orders/order_1');
+  });
+
+  it('marks a cancelled receipt and omits a stale cancel deadline', () => {
+    const footer = buildOrderFooter([
+      {
+        id: 'order_1',
+        orderNumber: 'ORD-7F3K2',
+        status: 'cancelled',
+        totalCents: 2599,
+        currency: 'USD',
+        receipt: true,
+        placedBy: 'user',
+        cancelledBy: 'agent',
+        cancelledAt: '2026-11-26T00:00:00.000Z',
+        cancellableUntil: '2026-11-26T00:30:00.000Z',
+        items: [{ name: 'Budget Buds', qty: 1, unitPriceCents: 2599 }],
+      },
+    ]);
+
+    expect(footer).toContain('placed by you');
+    expect(footer).toContain('Status: cancelled by the assistant');
+    expect(footer).not.toContain('cancellable until');
+  });
+
+  it('keeps compact history rows when no receipt is present', () => {
+    const footer = buildOrderFooter([
+      {
+        id: 'order_1',
+        orderNumber: 'ORD-1001',
+        status: 'delivered',
+        totalCents: 2599,
+        currency: 'USD',
+      },
+    ]);
+
+    expect(footer).toContain('Orders:');
+    expect(footer).not.toContain('Receipt:');
+  });
+
   it('returns an empty string when there are no rows', () => {
     expect(buildAgentFooter([], [])).toBe('');
   });

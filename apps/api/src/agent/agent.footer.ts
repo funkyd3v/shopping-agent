@@ -20,13 +20,70 @@ export function buildProductFooter(products: ProductFooterItem[]): string {
 
 export function buildOrderFooter(orders: OrderFooterItem[]): string {
   if (orders.length === 0) return '';
-  const lines = orders.map((order, index) => {
-    const link = `/orders/${order.id}`;
-    return `${index + 1}. ${label(order.orderNumber)} — ${label(order.status)} — ${formatUsd(
-      order.totalCents,
-    )} — ${isSafeChatHref(link) ? link : ''}`;
-  });
-  return `\n\nOrders:\n${lines.join('\n')}`;
+  const receipts = orders.filter((order) => order.receipt);
+  const summaries = orders.filter((order) => !order.receipt);
+
+  const receiptText = receipts
+    .map((order) => {
+      const link = `/orders/${order.id}`;
+      const actor =
+        order.placedBy === 'agent'
+          ? 'placed by the assistant'
+          : order.placedBy === 'user'
+            ? 'placed by you'
+            : null;
+      const origin = order.source === 'cart' ? 'from your cart' : null;
+      const heading = [label(order.orderNumber), actor, origin].filter(Boolean).join(' — ');
+      const items = (order.items ?? [])
+        .map(
+          (item, index) =>
+            `${index + 1}. ${label(item.name)} — ${item.qty} × ${formatUsd(
+              item.unitPriceCents,
+            )} = ${formatUsd(item.qty * item.unitPriceCents)}`,
+        )
+        .join('\n');
+      const status =
+        order.status === 'cancelled' && order.cancelledAt
+          ? `cancelled${order.cancelledBy ? ` by ${order.cancelledBy === 'agent' ? 'the assistant' : 'you'}` : ''}`
+          : label(order.status);
+      const deadline = order.status === 'placed' ? localTimestamp(order.cancellableUntil) : null;
+      return [
+        `Order ${heading}`,
+        ...(items.length > 0 ? [items] : []),
+        `Total: ${formatUsd(order.totalCents)}`,
+        `Status: ${status}${deadline ? ` — cancellable until ${deadline}` : ''}`,
+        isSafeChatHref(link) ? link : '',
+      ]
+        .filter((line) => line.length > 0)
+        .join('\n');
+    })
+    .join('\n\n');
+
+  const summaryText =
+    summaries.length === 0
+      ? ''
+      : `\n\nOrders:\n${summaries
+          .map((order, index) => {
+            const link = `/orders/${order.id}`;
+            return `${index + 1}. ${label(order.orderNumber)} — ${label(order.status)} — ${formatUsd(
+              order.totalCents,
+            )} — ${isSafeChatHref(link) ? link : ''}`;
+          })
+          .join('\n')}`;
+
+  return `${receiptText.length > 0 ? `\n\nReceipt:\n${receiptText}` : ''}${summaryText}`;
+}
+
+/** Cancel deadlines are shown in the server's local time (PLAN §9.8). */
+function localTimestamp(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  try {
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  } catch {
+    return date.toISOString();
+  }
 }
 
 export function buildCartFooter(cart: LastCartSummary): string {

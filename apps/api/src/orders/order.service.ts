@@ -39,6 +39,11 @@ export class OrderService {
     return this.write.cancelOrder({ actor, reference });
   }
 
+  /** Read-only price/stock check shared by the agent `quote_order` tool. */
+  quote(actor: OrderActor, items: OrderLineInput[], fromCart: boolean) {
+    return this.write.quote(actor, items, fromCart);
+  }
+
   async listForUser(userId: string, query: OrderListQuery): Promise<OrderList> {
     const where: Prisma.OrderWhereInput = { userId };
     if (query.status) where.status = query.status;

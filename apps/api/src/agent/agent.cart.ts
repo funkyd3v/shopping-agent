@@ -141,7 +141,7 @@ export function parseCartIntent(
       return clarify(AGENT_COPY.cartClearUnsupported, 'clear cart');
     }
     if (ORDER_WORD.test(text)) {
-      return clarify(AGENT_COPY.orderNotAvailable, 'order request');
+      return clarify(AGENT_COPY.orderClarify, 'order request');
     }
     if (hasCartWord) return { action: 'view', reason: 'cart mention' };
     return clarify(AGENT_COPY.cartClarify, 'no cart action');

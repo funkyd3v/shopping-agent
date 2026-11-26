@@ -26,7 +26,7 @@ Choose exactly one route:
 - review: summarize customer reviews or ratings for a product.
 - history: list or look up the customer's own orders.
 - cart: add/remove/update cart items or view the cart.
-- order: place, check out, or cancel an order (not available in this version).
+- order: place a direct order, check out the cart, quote a price, or cancel an order.
 - clarify: greetings, off-topic messages, or requests with no clear shopping action.
 
 Rules:
@@ -121,6 +121,8 @@ export function heuristicRoute(message: string): {
 } {
   const text = message.trim();
   if (text.length === 0) return { agent: 'clarify', confidence: 0.9, reason: 'empty' };
+  // A cancel verb is an action, not a history lookup, even with "my last order".
+  if (/\bcancel\b/i.test(text)) return { agent: 'order', confidence: 0.85, reason: 'cancel order' };
   if (HISTORY.test(text)) return { agent: 'history', confidence: 0.8, reason: 'order history' };
   if (REVIEW.test(text)) return { agent: 'review', confidence: 0.8, reason: 'review request' };
   if (ORDER.test(text)) return { agent: 'order', confidence: 0.75, reason: 'order action' };

@@ -70,10 +70,11 @@ export const AGENT_POLICY: AgentPolicy = {
 };
 
 export const AGENT_PROMPT_VERSIONS = {
-  router: 'agent-router-v2',
+  router: 'agent-router-v3',
   search: 'agent-search-v1',
   review: 'agent-review-v1',
   cart: 'agent-cart-v1',
+  order: 'agent-order-v1',
   history: 'agent-history-v1',
   clarify: 'agent-clarify-v1',
 } as const;
@@ -100,8 +101,24 @@ export const AGENT_COPY = {
   cartFallback: 'Here is your updated cart.',
   cartIntentUnresolved:
     'I did not change your cart because the request did not match a product and quantity in your message. Please name the product and quantity.',
-  orderNotAvailable:
-    'Placing or cancelling orders is not available in the assistant yet. You can review your orders on the Orders page (/orders).',
+  orderClarify:
+    'I can place an order, check out your cart, quote a price, or cancel an order. Which would you like?',
+  orderWhichProduct:
+    'Which product would you like to order? Search for one first, then say something like "order 2 of the second one".',
+  orderAmbiguous:
+    'I found more than one match. Which product do you mean? Name it, or say its position in the list.',
+  orderQtyLimit: 'You can order between 1 and 5 of an item. How many would you like?',
+  orderNonCommittal:
+    'I have not placed an order. If you want to order something, say so directly — for example "order 2 of the first one".',
+  orderCancelWhich:
+    'Which order should I cancel? Use its order number (ORD-…), or say "cancel my last order".',
+  orderCheckoutClarify:
+    'Should I check out your cart, or place a direct order for that product? Please say which one.',
+  orderPlacedIntro: 'Done — your order was placed.',
+  orderCheckoutIntro: 'Done — your cart was checked out into an order.',
+  orderCancelledIntro: 'Done — that order was cancelled and the items were restocked.',
+  orderIntentUnresolved:
+    'I did not place an order because the request did not match a product, quantity, or order in your message.',
   noProducts:
     'I could not find products matching that. Try a broader search or a different category.',
   noReviews: 'There are no customer reviews for that product yet.',
