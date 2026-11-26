@@ -165,6 +165,7 @@ export class AgentService {
           toolCalls: [],
           productFooter: [],
           orderFooter: [],
+          cartFooter: null,
           flaggedToolOutputs: 0,
           model: '',
           provider: '',
@@ -245,7 +246,11 @@ export class AgentService {
         });
       }
 
-      const text = `${answer}${buildAgentFooter(output.productFooter, output.orderFooter)}`;
+      const text = `${answer}${buildAgentFooter(
+        output.productFooter,
+        output.orderFooter,
+        output.cartFooter,
+      )}`;
       await this.sessions.persistAssistant({
         sessionId: session.id,
         turnId: turn.turnId,

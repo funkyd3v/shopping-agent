@@ -1,6 +1,8 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import type { Cart, CartLine } from '@shopping-agent/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { AgentToolRegistry, type ToolContext } from './agent.tools';
+import type { ListedProduct } from './agent.types';
 
 const context: ToolContext = {
   userId: 'user_1',
@@ -22,6 +24,35 @@ const product = {
   ratingCount: 12,
   imageUrl: null,
 };
+
+function cartLine(productId: string, qty: number): CartLine {
+  const unitPriceCents = productId === 'prod_2' ? 1999 : 7999;
+  return {
+    productId,
+    name: productId === 'prod_2' ? 'Budget Buds' : 'Wireless Headphones',
+    sku: productId === 'prod_2' ? 'SKU-2' : 'SKU-1',
+    category: 'Audio',
+    imageUrl: null,
+    qty,
+    unitPriceCents,
+    priceAtAddCents: unitPriceCents,
+    lineTotalCents: unitPriceCents * qty,
+    stock: 5,
+    priceChanged: false,
+    outOfStock: false,
+  };
+}
+
+function cartFixture(items: CartLine[] = [cartLine('prod_1', 1)]): Cart {
+  return {
+    id: 'cart_1',
+    items,
+    subtotalCents: items.reduce((sum, item) => sum + item.lineTotalCents, 0),
+    itemCount: items.reduce((sum, item) => sum + item.qty, 0),
+    warnings: [],
+    limits: { maxLines: 20, maxQtyPerItem: 5, maxOrderCents: 20_000 },
+  };
+}
 
 function setup() {
   const products = {
@@ -99,8 +130,18 @@ function setup() {
     })),
   };
 
-  const registry = new AgentToolRegistry(products as never, orders as never);
-  return { registry, products, orders };
+  const cart = {
+    getCart: vi.fn(async () => cartFixture([cartLine('prod_1', 1), cartLine('prod_2', 1)])),
+    addItem: vi.fn(async (_userId: string, input: { productId: string; qty: number }) =>
+      cartFixture([cartLine(input.productId, input.qty)]),
+    ),
+    updateItem: vi.fn(async (_userId: string, productId: string, input: { qty: number }) =>
+      cartFixture(input.qty === 0 ? [] : [cartLine(productId, input.qty)]),
+    ),
+  };
+
+  const registry = new AgentToolRegistry(products as never, orders as never, cart as never);
+  return { registry, products, orders, cart };
 }
 
 describe('AgentToolRegistry', () => {
@@ -108,6 +149,7 @@ describe('AgentToolRegistry', () => {
     const { registry } = setup();
     expect(registry.specsFor('search').length).toBeLessThanOrEqual(3);
     expect(registry.specsFor('review')).toHaveLength(1);
+    expect(registry.specsFor('cart')).toHaveLength(3);
     expect(registry.specsFor('history').length).toBeLessThanOrEqual(3);
     expect(registry.specsFor('clarify')).toEqual([]);
   });
@@ -193,5 +235,127 @@ describe('AgentToolRegistry', () => {
     const result = await registry.execute('get_product', { productId: 'missing' }, context);
     expect(result.record.ok).toBe(false);
     expect(result.record.errorCode).toBe('NOT_FOUND');
+  });
+
+  const listed: ListedProduct[] = [
+    {
+      id: 'prod_1',
+      name: 'Wireless Headphones',
+      priceCents: 7999,
+      ratingAvg: 4.6,
+      ratingCount: 12,
+      position: 1,
+      sku: 'SKU-1',
+    },
+    {
+      id: 'prod_2',
+      name: 'Budget Buds',
+      priceCents: 1999,
+      ratingAvg: 3.2,
+      ratingCount: 8,
+      position: 2,
+      sku: 'SKU-2',
+    },
+  ];
+
+  it('views the cart for the injected user', async () => {
+    const { registry, cart } = setup();
+
+    const result = await registry.execute('view_cart', {}, { ...context, message: 'show my cart' });
+
+    expect(cart.getCart).toHaveBeenCalledWith('user_1');
+    expect(result.record).toEqual({ name: 'view_cart', ok: true });
+    expect(result.cartSummary?.items.map((item) => item.productId)).toEqual(['prod_1', 'prod_2']);
+    expect(result.fallbackText).toBe('Here is your cart.');
+  });
+
+  it('adds the resolved product and quantity to the cart', async () => {
+    const { registry, cart } = setup();
+
+    const result = await registry.execute(
+      'add_to_cart',
+      { productId: 'prod_2', qty: 2 },
+      { ...context, message: 'add 2 of the second one to my cart', lastListedProducts: listed },
+    );
+
+    expect(cart.addItem).toHaveBeenCalledWith('user_1', { productId: 'prod_2', qty: 2 });
+    expect(result.record).toEqual({ name: 'add_to_cart', ok: true });
+    expect(result.cartSummary?.items).toEqual([
+      { productId: 'prod_2', name: 'Budget Buds', qty: 2, unitPriceCents: 1999 },
+    ]);
+    expect(result.fallbackText).toContain('Added 2 × Budget Buds');
+  });
+
+  it('rejects tool arguments that do not match the user message', async () => {
+    const { registry, cart } = setup();
+
+    const result = await registry.execute(
+      'add_to_cart',
+      { productId: 'prod_1', qty: 1 },
+      { ...context, message: 'add the second one to my cart', lastListedProducts: listed },
+    );
+
+    expect(cart.addItem).not.toHaveBeenCalled();
+    expect(result.record).toEqual({
+      name: 'add_to_cart',
+      ok: false,
+      errorCode: 'INTENT_UNRESOLVED',
+    });
+    expect(result.fallbackText).toContain('did not change your cart');
+  });
+
+  it('asks for clarification instead of committing non-committal language', async () => {
+    const { registry, cart } = setup();
+
+    const result = await registry.execute(
+      'add_to_cart',
+      { productId: 'prod_2', qty: 1 },
+      {
+        ...context,
+        message: "maybe I'm thinking about adding the second one to my cart",
+        lastListedProducts: listed,
+      },
+    );
+
+    expect(cart.addItem).not.toHaveBeenCalled();
+    expect(result.record.errorCode).toBe('NEEDS_CLARIFICATION');
+    expect(result.fallbackText).toBe(
+      'I have not changed your cart. If you want to add or update something, say so directly.',
+    );
+  });
+
+  it('removes a cart line by resolving it from the current cart', async () => {
+    const { registry, cart } = setup();
+
+    const result = await registry.execute(
+      'update_cart_item',
+      { productId: 'prod_1', qty: 0 },
+      { ...context, message: 'remove the first one from my cart' },
+    );
+
+    expect(cart.getCart).toHaveBeenCalledWith('user_1');
+    expect(cart.updateItem).toHaveBeenCalledWith('user_1', 'prod_1', { qty: 0 });
+    expect(result.record).toEqual({ name: 'update_cart_item', ok: true });
+    expect(result.cartSummary?.items).toEqual([]);
+  });
+
+  it('returns structured cart limit errors with friendly fallback text', async () => {
+    const { registry, cart } = setup();
+    cart.addItem.mockRejectedValueOnce(
+      new BadRequestException({
+        code: 'CART_LIMIT',
+        message: 'Your cart already has the maximum of 20 lines.',
+      }),
+    );
+
+    const result = await registry.execute(
+      'add_to_cart',
+      { productId: 'prod_2', qty: 2 },
+      { ...context, message: 'add 2 of the second one to my cart', lastListedProducts: listed },
+    );
+
+    expect(result.record).toEqual({ name: 'add_to_cart', ok: false, errorCode: 'CART_LIMIT' });
+    expect(result.fallbackText).toBe('Your cart already has the maximum of 20 lines.');
+    expect(result.cartSummary).toBeUndefined();
   });
 });

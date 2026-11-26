@@ -1,11 +1,19 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ORDER_STATUSES, type OrderStatus } from '@shopping-agent/shared';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
+import { type Cart, ORDER_STATUSES, type OrderStatus } from '@shopping-agent/shared';
 import { z } from 'zod';
+import { CartService } from '../cart/cart.service';
 import { ProductSearchService, type ReviewSort } from '../catalog/product-search.service';
 import { OrderService } from '../orders/order.service';
+import {
+  type CartIntent,
+  cartToListedProducts,
+  cartToSummary,
+  parseCartIntent,
+} from './agent.cart';
 import { AGENT_COPY, AGENT_POLICY } from './agent.policy';
 import type {
   AgentRoute,
+  LastCartSummary,
   LastOrder,
   ListedProduct,
   OrderFooterItem,
@@ -34,6 +42,8 @@ export type ToolExecution = {
   message: string;
   lastListedProducts?: ListedProduct[];
   lastOrder?: LastOrder;
+  /** Present only when a cart tool completed; empty carts are still a summary. */
+  cartSummary?: LastCartSummary;
   products?: ProductFooterItem[];
   orders?: OrderFooterItem[];
   flagged?: number;
@@ -71,6 +81,18 @@ const getOrderSchema = z.object({
   orderId: z.string().trim().min(1).max(100),
 });
 
+const viewCartSchema = z.object({});
+
+const addToCartSchema = z.object({
+  productId: z.string().trim().min(1).max(64),
+  qty: z.number().int().min(1).max(5),
+});
+
+const updateCartItemSchema = z.object({
+  productId: z.string().trim().min(1).max(64),
+  qty: z.number().int().min(0).max(5),
+});
+
 const SPECS: Record<string, AgentToolSpec> = {
   search_products: {
     name: 'search_products',
@@ -102,10 +124,29 @@ const SPECS: Record<string, AgentToolSpec> = {
       "Fetch one of the authenticated customer's orders by id or order number (ORD-...). Returns items, quantities, unit prices, status, and a store link.",
     schema: getOrderSchema,
   },
+  view_cart: {
+    name: 'view_cart',
+    description:
+      "Show the authenticated customer's current cart with lines, quantities, current prices, subtotal, and warnings.",
+    schema: viewCartSchema,
+  },
+  add_to_cart: {
+    name: 'add_to_cart',
+    description:
+      'Add a product to the cart by its exact id from the listed products. qty is 1-5. Adding an existing product increments its quantity up to 5. Enforces stock and cart-line limits.',
+    schema: addToCartSchema,
+  },
+  update_cart_item: {
+    name: 'update_cart_item',
+    description:
+      'Set the quantity of a product already in the cart, by exact product id. qty 0 removes the line. Enforces the per-item quantity limit.',
+    schema: updateCartItemSchema,
+  },
 };
 
 const SEARCH_TOOLS = [SPECS.search_products, SPECS.get_product] as AgentToolSpec[];
 const REVIEW_TOOLS = [SPECS.get_reviews] as AgentToolSpec[];
+const CART_TOOLS = [SPECS.view_cart, SPECS.add_to_cart, SPECS.update_cart_item] as AgentToolSpec[];
 const HISTORY_TOOLS = [SPECS.list_orders, SPECS.get_order] as AgentToolSpec[];
 
 /**
@@ -120,11 +161,13 @@ export class AgentToolRegistry {
   constructor(
     private readonly products: ProductSearchService,
     private readonly orders: OrderService,
+    private readonly cart: CartService,
   ) {}
 
   specsFor(agent: AgentRoute): AgentToolSpec[] {
     if (agent === 'search') return SEARCH_TOOLS;
     if (agent === 'review') return REVIEW_TOOLS;
+    if (agent === 'cart') return CART_TOOLS;
     if (agent === 'history') return HISTORY_TOOLS;
     return [];
   }
@@ -156,6 +199,21 @@ export class AgentToolRegistry {
           const parsed = getOrderSchema.safeParse(rawArgs);
           if (!parsed.success) return invalidArguments(name, parsed.error.issues);
           return await this.getOrder(ctx.userId, parsed.data.orderId);
+        }
+        case 'view_cart': {
+          const parsed = viewCartSchema.safeParse(rawArgs ?? {});
+          if (!parsed.success) return invalidArguments(name, parsed.error.issues);
+          return await this.viewCart(ctx.userId);
+        }
+        case 'add_to_cart': {
+          const parsed = addToCartSchema.safeParse(rawArgs);
+          if (!parsed.success) return invalidArguments(name, parsed.error.issues);
+          return await this.addToCart(ctx, parsed.data);
+        }
+        case 'update_cart_item': {
+          const parsed = updateCartItemSchema.safeParse(rawArgs);
+          if (!parsed.success) return invalidArguments(name, parsed.error.issues);
+          return await this.updateCartItem(ctx, parsed.data);
         }
         default:
           return errorResult(name, 'UNKNOWN_TOOL', 'That tool is not available.');
@@ -193,9 +251,14 @@ export class AgentToolRegistry {
       ratingAvg: product.ratingAvg,
       ratingCount: product.ratingCount,
     }));
-    const listed: ListedProduct[] = products.map((product, index) => ({
-      ...product,
+    const listed: ListedProduct[] = filtered.map((product, index) => ({
+      id: product.id,
+      name: product.name,
+      priceCents: product.priceCents,
+      ratingAvg: product.ratingAvg,
+      ratingCount: product.ratingCount,
       position: index + 1,
+      sku: product.sku,
     }));
 
     return {
@@ -253,7 +316,7 @@ export class AgentToolRegistry {
           link: `/products/${product.id}`,
         },
       }),
-      lastListedProducts: [{ ...footer, position: 1 }],
+      lastListedProducts: [{ ...footer, position: 1, sku: product.sku }],
       products: [footer],
       fallbackText: AGENT_COPY.productFallbackIntro,
     };
@@ -397,17 +460,152 @@ export class AgentToolRegistry {
     };
   }
 
+  private async viewCart(userId: string): Promise<ToolExecution> {
+    const cart = await this.cart.getCart(userId);
+    return this.cartResult(
+      'view_cart',
+      cart,
+      cart.itemCount === 0 ? AGENT_COPY.cartEmpty : AGENT_COPY.cartFallbackIntro,
+    );
+  }
+
+  private async addToCart(
+    ctx: ToolContext,
+    args: { productId: string; qty: number },
+  ): Promise<ToolExecution> {
+    const intent = parseCartIntent(ctx.message, ctx.lastListedProducts);
+    const guard = this.cartIntentGuard('add_to_cart', intent, args);
+    if (guard) return guard;
+
+    const cart = await this.cart.addItem(ctx.userId, {
+      productId: args.productId,
+      qty: args.qty,
+    });
+    const line = cart.items.find((item) => item.productId === args.productId);
+    return this.cartResult(
+      'add_to_cart',
+      cart,
+      line
+        ? `Added ${args.qty} × ${line.name} to your cart. Your cart now has ${line.qty}.`
+        : AGENT_COPY.cartFallback,
+    );
+  }
+
+  private async updateCartItem(
+    ctx: ToolContext,
+    args: { productId: string; qty: number },
+  ): Promise<ToolExecution> {
+    // The resolver needs the real cart lines for "remove the first one".
+    const current = await this.cart.getCart(ctx.userId);
+    const intent = parseCartIntent(
+      ctx.message,
+      ctx.lastListedProducts,
+      cartToListedProducts(current),
+    );
+    const guard = this.cartIntentGuard('update_cart_item', intent, args);
+    if (guard) return guard;
+
+    const name =
+      current.items.find((item) => item.productId === args.productId)?.name ?? 'that item';
+    const cart = await this.cart.updateItem(ctx.userId, args.productId, { qty: args.qty });
+    const line = cart.items.find((item) => item.productId === args.productId);
+    return this.cartResult(
+      'update_cart_item',
+      cart,
+      args.qty === 0
+        ? `Removed ${name} from your cart.`
+        : `Updated ${line?.name ?? name} to ${args.qty} in your cart.`,
+    );
+  }
+
+  private cartResult(name: string, cart: Cart, fallbackText: string): ToolExecution {
+    return {
+      record: { name, ok: true },
+      message: envelope('cart', {
+        items: cart.items.map((item, index) => ({
+          position: index + 1,
+          productId: item.productId,
+          name: item.name,
+          qty: item.qty,
+          unitPriceCents: item.unitPriceCents,
+          lineTotalCents: item.lineTotalCents,
+          stock: item.stock,
+          priceChanged: item.priceChanged,
+          outOfStock: item.outOfStock,
+        })),
+        itemCount: cart.itemCount,
+        subtotalCents: cart.subtotalCents,
+        warnings: cart.warnings.map((warning) => warning.message),
+        link: '/cart',
+      }),
+      cartSummary: cartToSummary(cart),
+      fallbackText,
+    };
+  }
+
+  private cartIntentGuard(
+    name: string,
+    intent: CartIntent,
+    args: { productId: string; qty: number },
+  ): ToolExecution | null {
+    if ('needsClarification' in intent) {
+      return {
+        record: { name, ok: false, errorCode: 'NEEDS_CLARIFICATION' },
+        message: envelope('cart', {
+          error: { code: 'NEEDS_CLARIFICATION', message: intent.question },
+        }),
+        fallbackText: intent.question,
+      };
+    }
+
+    if (intent.action === 'view') return intentUnresolved(name);
+    const actionMatches =
+      name === 'add_to_cart' ? intent.action === 'add' : intent.action === 'update';
+    if (!actionMatches || intent.product.id !== args.productId || intent.qty !== args.qty) {
+      return intentUnresolved(name);
+    }
+    return null;
+  }
+
   private fromError(name: string, error: unknown): ToolExecution {
-    if (error instanceof NotFoundException) {
-      const code = 'NOT_FOUND';
-      const message = name === 'get_order' ? AGENT_COPY.orderNotFound : AGENT_COPY.productNotFound;
-      return errorResult(name, code, message);
+    if (error instanceof HttpException) {
+      const response = error.getResponse();
+      const body =
+        typeof response === 'string'
+          ? { message: response }
+          : (response as { code?: string; message?: string });
+      const code = body.code ?? 'TOOL_ERROR';
+      const message =
+        code === 'NOT_FOUND' && name === 'get_order'
+          ? AGENT_COPY.orderNotFound
+          : code === 'NOT_FOUND' && name === 'get_product'
+            ? AGENT_COPY.productNotFound
+            : (body.message ?? 'The tool could not complete that request.');
+      return {
+        record: { name, ok: false, errorCode: code },
+        message: envelope(isCartTool(name) ? 'cart' : 'tool', { error: { code, message } }),
+        ...(isCartTool(name) ? { fallbackText: message } : {}),
+      };
     }
     this.logger.warn(
       `agent tool ${name} failed: ${error instanceof Error ? error.message : 'unknown'}`,
     );
     return errorResult(name, 'TOOL_ERROR', 'The tool could not complete that request.');
   }
+}
+
+function isCartTool(name: string): boolean {
+  return name === 'view_cart' || name === 'add_to_cart' || name === 'update_cart_item';
+}
+
+function intentUnresolved(name: string): ToolExecution {
+  return {
+    record: { name, ok: false, errorCode: 'INTENT_UNRESOLVED' },
+    message: envelope('cart', {
+      error: { code: 'INTENT_UNRESOLVED', message: AGENT_COPY.cartIntentUnresolved },
+    }),
+    fallbackText: AGENT_COPY.cartIntentUnresolved,
+  };
 }
 
 function envelope(source: string, data: unknown): string {

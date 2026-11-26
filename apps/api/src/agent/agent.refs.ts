@@ -31,16 +31,21 @@ export function resolveProductReference(
   const text = message.trim();
   if (text.length === 0 || products.length === 0) return null;
 
-  // Explicit product id always wins.
-  const explicit = products.find((product) =>
-    text.toLowerCase().includes(product.id.toLowerCase()),
-  );
+  // Explicit product id or SKU always wins.
+  const lower = text.toLowerCase();
+  const explicit = products.find((product) => lower.includes(product.id.toLowerCase()));
   if (explicit) {
     return {
       product: explicit,
       index: explicit.position - 1,
       reason: 'explicit product id',
     };
+  }
+  const bySku = products.find(
+    (product) => product.sku !== undefined && lower.includes(product.sku.toLowerCase()),
+  );
+  if (bySku) {
+    return { product: bySku, index: bySku.position - 1, reason: 'explicit sku' };
   }
 
   for (const ordinal of ORDINALS) {
@@ -69,7 +74,6 @@ export function resolveProductReference(
   }
 
   // Full name or a unique distinctive name token.
-  const lower = text.toLowerCase();
   const byName = products.filter((product) => lower.includes(product.name.toLowerCase()));
   if (byName.length === 1) {
     const product = byName[0] as ListedProduct;

@@ -31,6 +31,7 @@ function input(overrides: Partial<AgentGraphInput> = {}): AgentGraphInput {
     toolCalls: [],
     productFooter: [],
     orderFooter: [],
+    cartFooter: null,
     flaggedToolOutputs: 0,
     model: '',
     provider: '',
@@ -72,10 +73,16 @@ function tools(executions: Record<string, ToolExecution> = {}): AgentGraphDeps['
           ]
         : agent === 'review'
           ? [{ name: 'get_reviews', description: '', schema: {} as never }]
-          : [
-              { name: 'list_orders', description: '', schema: {} as never },
-              { name: 'get_order', description: '', schema: {} as never },
-            ],
+          : agent === 'cart'
+            ? [
+                { name: 'view_cart', description: '', schema: {} as never },
+                { name: 'add_to_cart', description: '', schema: {} as never },
+                { name: 'update_cart_item', description: '', schema: {} as never },
+              ]
+            : [
+                { name: 'list_orders', description: '', schema: {} as never },
+                { name: 'get_order', description: '', schema: {} as never },
+              ],
     execute: vi.fn(
       async (name: string) => executions[name] ?? execution({ record: { name, ok: true } }),
     ),
@@ -236,17 +243,110 @@ describe('read-only agent graph', () => {
     expect(result.reply).not.toContain('ORD-1001');
   });
 
-  it('explains that cart actions are not available yet', async () => {
-    const modelCall = model([step('{"agent":"cart","confidence":0.95,"reason":"cart"}')]);
+  it('adds the second listed product to the cart and returns a cart footer', async () => {
+    const checkpointer = new MemorySaver();
+    const listed = [product(1), product(2)];
+    const cartSummary = {
+      items: [{ productId: 'prod_2', name: 'Product 2', qty: 2, unitPriceCents: 2000 }],
+      subtotalCents: 4000,
+    };
+    const registry = tools({
+      search_products: execution({
+        lastListedProducts: listed,
+        products: listed.map(({ position: _position, ...rest }) => rest),
+      }),
+      add_to_cart: execution({
+        record: { name: 'add_to_cart', ok: true },
+        cartSummary,
+        fallbackText: 'Added 2 × Product 2 to your cart.',
+      }),
+    });
+    const searchModel = model([
+      step('{"agent":"search","confidence":0.9,"reason":"search"}'),
+      step('', [{ id: 'call_1', name: 'search_products', args: { query: 'headphones' } }]),
+      step('Here are the products.'),
+    ]);
+    await runAgentGraph(input(), deps(searchModel, registry), { checkpointer });
 
+    const cartModel = model([
+      step('{"agent":"cart","confidence":0.95,"reason":"cart"}'),
+      step('', [{ id: 'call_2', name: 'add_to_cart', args: { productId: 'prod_2', qty: 2 } }]),
+      step('Added it to your cart.'),
+    ]);
     const result = await runAgentGraph(
-      input({ message: 'add the second one to my cart' }),
-      deps(modelCall),
+      input({ turnId: 'turn_2', message: 'add 2 of the second one to my cart' }),
+      deps(cartModel, registry),
+      { checkpointer },
     );
 
     expect(result.route).toBe('cart');
-    expect(result.reply).toBe(AGENT_COPY.cartNotAvailable);
-    expect(result.toolCalls).toEqual([]);
+    expect(registry.execute).toHaveBeenCalledWith(
+      'add_to_cart',
+      { productId: 'prod_2', qty: 2 },
+      expect.objectContaining({ userId: 'user_1' }),
+    );
+    expect(result.cartFooter).toEqual(cartSummary);
+    expect(result.lastCartSummary).toEqual(cartSummary);
+    expect(result.reply).toContain('Added it');
+  });
+
+  it('falls back to a deterministic cart add when the model answers without a tool', async () => {
+    const checkpointer = new MemorySaver();
+    const listed = [product(1), product(2)];
+    const cartSummary = {
+      items: [{ productId: 'prod_2', name: 'Product 2', qty: 2, unitPriceCents: 2000 }],
+      subtotalCents: 4000,
+    };
+    const registry = tools({
+      search_products: execution({
+        lastListedProducts: listed,
+        products: listed.map(({ position: _position, ...rest }) => rest),
+      }),
+      add_to_cart: execution({ cartSummary }),
+    });
+    const searchModel = model([
+      step('{"agent":"search","confidence":0.9,"reason":"search"}'),
+      step('', [{ id: 'call_1', name: 'search_products', args: { query: 'headphones' } }]),
+      step('Here are the products.'),
+    ]);
+    await runAgentGraph(input(), deps(searchModel, registry), { checkpointer });
+
+    const cartModel = model([
+      step('{"agent":"cart","confidence":0.95,"reason":"cart"}'),
+      step('I can add that for you.'),
+      step('Done.'),
+    ]);
+    const result = await runAgentGraph(
+      input({ turnId: 'turn_2', message: 'add 2 of the second one to my cart' }),
+      deps(cartModel, registry),
+      { checkpointer },
+    );
+
+    expect(registry.execute).toHaveBeenCalledWith(
+      'add_to_cart',
+      { productId: 'prod_2', qty: 2 },
+      expect.anything(),
+    );
+    expect(result.cartFooter).toEqual(cartSummary);
+    expect(result.reply).toBe('Done.');
+  });
+
+  it('does not change the cart for non-committal language', async () => {
+    const registry = tools();
+    const modelCall = model([
+      step('{"agent":"cart","confidence":0.95,"reason":"cart"}'),
+      step('I could add that if you want.'),
+    ]);
+
+    const result = await runAgentGraph(
+      input({ message: "I'm thinking about adding the second one to my cart" }),
+      deps(modelCall, registry),
+    );
+
+    expect(result.route).toBe('cart');
+    expect(result.reply).toBe(AGENT_COPY.cartNonCommittal);
+    expect(registry.execute).not.toHaveBeenCalled();
+    expect(result.cartFooter).toBeNull();
   });
 
   it('uses the deterministic heuristic when the router is low-confidence', async () => {

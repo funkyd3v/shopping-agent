@@ -1,6 +1,6 @@
 import { isSafeChatHref } from '@shopping-agent/shared';
 import { formatUsd } from '../common/money';
-import type { OrderFooterItem, ProductFooterItem } from './agent.types';
+import type { LastCartSummary, OrderFooterItem, ProductFooterItem } from './agent.types';
 
 /**
  * Server-generated facts footers (PLAN §8.6). Built from DB data after output
@@ -29,8 +29,29 @@ export function buildOrderFooter(orders: OrderFooterItem[]): string {
   return `\n\nOrders:\n${lines.join('\n')}`;
 }
 
-export function buildAgentFooter(products: ProductFooterItem[], orders: OrderFooterItem[]): string {
-  return `${buildProductFooter(products)}${buildOrderFooter(orders)}`;
+export function buildCartFooter(cart: LastCartSummary): string {
+  if (!cart) return '';
+  const link = '/cart';
+  if (cart.items.length === 0) {
+    return `\n\nCart: empty${isSafeChatHref(link) ? ` — ${link}` : ''}`;
+  }
+  const lines = cart.items.map((item, index) => {
+    const lineTotalCents = item.unitPriceCents * item.qty;
+    return `${index + 1}. ${label(item.name)} — ${item.qty} × ${formatUsd(
+      item.unitPriceCents,
+    )} = ${formatUsd(lineTotalCents)}`;
+  });
+  return `\n\nCart:\n${lines.join('\n')}\nSubtotal: ${formatUsd(cart.subtotalCents)}${
+    isSafeChatHref(link) ? `\n${link}` : ''
+  }`;
+}
+
+export function buildAgentFooter(
+  products: ProductFooterItem[],
+  orders: OrderFooterItem[],
+  cart: LastCartSummary = null,
+): string {
+  return `${buildProductFooter(products)}${buildOrderFooter(orders)}${buildCartFooter(cart)}`;
 }
 
 function label(value: string): string {

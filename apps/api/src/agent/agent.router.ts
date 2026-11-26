@@ -25,7 +25,7 @@ Choose exactly one route:
 - search: find, browse, compare, or recommend products; ask about prices, stock, or availability.
 - review: summarize customer reviews or ratings for a product.
 - history: list or look up the customer's own orders.
-- cart: add/remove/update cart items or view the cart (not available in this version).
+- cart: add/remove/update cart items or view the cart.
 - order: place, check out, or cancel an order (not available in this version).
 - clarify: greetings, off-topic messages, or requests with no clear shopping action.
 
@@ -107,9 +107,9 @@ const HISTORY =
 const REVIEW =
   /\b(?:reviews?|ratings?|feedback|opinions?|what\s+do\s+(?:people|customers)\s+say|worth\s+(?:it|buying))\b/i;
 const CART =
-  /\b(?:view|show|open|see)\s+(?:my\s+)?cart\b|\b(?:add|put|remove|update|change)\b.{0,40}\b(?:cart|basket)\b|\bcheckout\b/i;
+  /\b(?:view|show|open|see|display|what(?:'s| is)\s+in)\b.{0,30}\bcart\b|\b(?:add|put|remove|delete|update|change|set|clear|empty)\b.{0,40}\b(?:cart|basket)\b|\b(?:my|the)\s+(?:cart|basket)\b/i;
 const ORDER =
-  /\b(?:place|create|submit|buy|purchase|order)\b.{0,30}\b(?:order|it|this|that|them|one|the)\b|\bcancel\b.{0,30}\border\b|\bcheckout\b/i;
+  /\b(?:place|create|submit|buy|purchase|order)\b.{0,30}\b(?:order|it|this|that|them|one|the)\b|\bcancel\b.{0,30}\border\b|\bcheck\s*out\b|\bcheckout\b/i;
 const SEARCH =
   /\b(?:find|search|show|looking\s+for|recommend|suggest|browse|compare|products?|items?|headphones?|earbuds?|laptops?|keyboards?|mouse|mice|monitors?|speakers?|cameras?|watches?|backpacks?|shoes?|fitness|home|outdoors|accessories|audio|computers?|price|prices|cost|stock|available|in\s+stock|under\s+\$|less\s+than\s+\$|cheapest|best)\b/i;
 
@@ -123,8 +123,8 @@ export function heuristicRoute(message: string): {
   if (text.length === 0) return { agent: 'clarify', confidence: 0.9, reason: 'empty' };
   if (HISTORY.test(text)) return { agent: 'history', confidence: 0.8, reason: 'order history' };
   if (REVIEW.test(text)) return { agent: 'review', confidence: 0.8, reason: 'review request' };
-  if (CART.test(text)) return { agent: 'cart', confidence: 0.8, reason: 'cart action' };
   if (ORDER.test(text)) return { agent: 'order', confidence: 0.75, reason: 'order action' };
+  if (CART.test(text)) return { agent: 'cart', confidence: 0.8, reason: 'cart action' };
   if (SEARCH.test(text)) return { agent: 'search', confidence: 0.7, reason: 'product search' };
   return { agent: 'clarify', confidence: 0.5, reason: 'no clear shopping action' };
 }

@@ -1,4 +1,5 @@
 import { Module, type OnApplicationShutdown } from '@nestjs/common';
+import { CartModule } from '../cart/cart.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { ChatModule } from '../chat/chat.module';
 import { getEnv } from '../config/env';
@@ -13,7 +14,14 @@ import { AgentToolRegistry } from './agent.tools';
 import { AgentRunService } from './agent-run.service';
 
 @Module({
-  imports: [ModelGatewayModule, ChatModule, GuardrailsModule, CatalogModule, OrdersModule],
+  imports: [
+    ModelGatewayModule,
+    ChatModule,
+    GuardrailsModule,
+    CatalogModule,
+    CartModule,
+    OrdersModule,
+  ],
   controllers: [AgentController],
   providers: [
     AgentService,

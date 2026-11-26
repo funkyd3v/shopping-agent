@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildAgentFooter, buildOrderFooter, buildProductFooter } from './agent.footer';
+import {
+  buildAgentFooter,
+  buildCartFooter,
+  buildOrderFooter,
+  buildProductFooter,
+} from './agent.footer';
 
 describe('agent footers', () => {
   it('builds a numbered product footer from DB data', () => {
@@ -52,6 +57,39 @@ describe('agent footers', () => {
 
     expect(footer).not.toContain('<script>');
     expect(footer).not.toContain('/products/bad id');
+    expect(footer).toContain('Headphones');
+  });
+
+  it('builds a cart footer with quantities, line totals, and the cart link', () => {
+    const footer = buildCartFooter({
+      items: [{ productId: 'prod_1', name: 'Wireless Headphones', qty: 2, unitPriceCents: 7999 }],
+      subtotalCents: 15_998,
+    });
+
+    expect(footer).toContain('Cart:');
+    expect(footer).toContain('1. Wireless Headphones — 2 × $79.99 = $159.98');
+    expect(footer).toContain('Subtotal: $159.98');
+    expect(footer).toContain('/cart');
+  });
+
+  it('marks an empty cart footer', () => {
+    expect(buildCartFooter({ items: [], subtotalCents: 0 })).toContain('Cart: empty');
+  });
+
+  it('strips markup from cart labels', () => {
+    const footer = buildCartFooter({
+      items: [
+        {
+          productId: 'prod_1',
+          name: '<script>alert(1)</script>Headphones',
+          qty: 1,
+          unitPriceCents: 1000,
+        },
+      ],
+      subtotalCents: 1000,
+    });
+
+    expect(footer).not.toContain('<script>');
     expect(footer).toContain('Headphones');
   });
 

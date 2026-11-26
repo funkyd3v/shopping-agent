@@ -117,10 +117,17 @@ function setup(options: Setup = {}) {
   };
 
   const tools = {
-    specsFor: () => [
-      { name: 'search_products', description: '', schema: {} as never },
-      { name: 'get_product', description: '', schema: {} as never },
-    ],
+    specsFor: (agent: string) =>
+      agent === 'cart'
+        ? [
+            { name: 'view_cart', description: '', schema: {} as never },
+            { name: 'add_to_cart', description: '', schema: {} as never },
+            { name: 'update_cart_item', description: '', schema: {} as never },
+          ]
+        : [
+            { name: 'search_products', description: '', schema: {} as never },
+            { name: 'get_product', description: '', schema: {} as never },
+          ],
     execute: vi.fn(async (name: string): Promise<ToolExecution> => {
       if (options.executeError) throw options.executeError;
       return (
@@ -199,6 +206,38 @@ describe('AgentService', () => {
     });
     expect(usage.length).toBeGreaterThanOrEqual(2);
     expect(sessions.updateUserModelContent).toHaveBeenCalledWith('message_1', expect.any(String));
+  });
+
+  it('appends the server cart footer after a cart turn', async () => {
+    const { service, persisted } = setup({
+      router: '{"agent":"cart","confidence":0.95,"reason":"cart"}',
+      toolCall: { id: 'call_1', name: 'add_to_cart', args: { productId: 'prod_1', qty: 2 } },
+      reply: 'Added it to your cart.',
+      execution: {
+        record: { name: 'add_to_cart', ok: true },
+        message: '{}',
+        cartSummary: {
+          items: [
+            { productId: 'prod_1', name: 'Wireless Headphones', qty: 2, unitPriceCents: 7999 },
+          ],
+          subtotalCents: 15_998,
+        },
+        fallbackText: 'Added 2 × Wireless Headphones to your cart.',
+      },
+    });
+
+    const result = await service.run(preparedTurn('add 2 of the second one to my cart'), {
+      signal: new AbortController().signal,
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.route).toBe('cart');
+    expect(result.text).toContain('Added it to your cart.');
+    expect(result.text).toContain('Cart:');
+    expect(result.text).toContain('2 × $79.99 = $159.98');
+    expect(result.text).toContain('Subtotal: $159.98');
+    expect(result.text).toContain('/cart');
+    expect(persisted.at(-1)).toMatchObject({ content: result.text, status: 'complete' });
   });
 
   it('redacts input PII before the model sees it and records the guardrail', async () => {

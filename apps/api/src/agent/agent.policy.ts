@@ -70,9 +70,10 @@ export const AGENT_POLICY: AgentPolicy = {
 };
 
 export const AGENT_PROMPT_VERSIONS = {
-  router: 'agent-router-v1',
+  router: 'agent-router-v2',
   search: 'agent-search-v1',
   review: 'agent-review-v1',
+  cart: 'agent-cart-v1',
   history: 'agent-history-v1',
   clarify: 'agent-clarify-v1',
 } as const;
@@ -82,8 +83,23 @@ export const AGENT_COPY = {
     'I can help you find products, summarize customer reviews, or look up your orders. What would you like to do?',
   offTopic:
     'I can help with product search, customer reviews, and your order history. What would you like to look for?',
-  cartNotAvailable:
-    'Cart changes are not available in the assistant yet. You can view and update your cart on the Cart page (/cart).',
+  cartClarify:
+    'I can show your cart, add a product to it, or change a quantity. What would you like to do?',
+  cartWhichProduct:
+    'Which product would you like to add? Search for a product first, then say something like "add the second one to my cart".',
+  cartAmbiguous:
+    'I found more than one match. Which product do you mean? Name it, or say its position in the list.',
+  cartQtyClarify: 'How many would you like? You can add between 1 and 5 of an item.',
+  cartQtyLimit: 'You can have up to 5 of each item in your cart. Try a quantity of 5 or fewer.',
+  cartNonCommittal:
+    'I have not changed your cart. If you want to add or update something, say so directly.',
+  cartClearUnsupported:
+    'I can remove items one at a time. Which item should I remove from your cart?',
+  cartEmpty: 'Your cart is empty.',
+  cartFallbackIntro: 'Here is your cart.',
+  cartFallback: 'Here is your updated cart.',
+  cartIntentUnresolved:
+    'I did not change your cart because the request did not match a product and quantity in your message. Please name the product and quantity.',
   orderNotAvailable:
     'Placing or cancelling orders is not available in the assistant yet. You can review your orders on the Orders page (/orders).',
   noProducts:

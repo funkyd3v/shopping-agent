@@ -4,8 +4,8 @@ import type { GatewayToolCall } from '../model-gateway/model-gateway.service';
 export const AGENT_ROUTES = ['search', 'review', 'cart', 'order', 'history', 'clarify'] as const;
 export type AgentRoute = (typeof AGENT_ROUTES)[number];
 
-/** Phase 4 implements these nodes; cart/order arrive in Phases 5–6. */
-export type ImplementedAgent = 'search' | 'review' | 'history' | 'clarify';
+/** Phase 5 implements cart; the order node arrives in Phase 6. */
+export type ImplementedAgent = 'search' | 'review' | 'cart' | 'history' | 'clarify';
 
 export type RouteSource = 'model' | 'heuristic' | 'fallback';
 
@@ -19,6 +19,8 @@ export type ListedProduct = {
   ratingAvg: number;
   ratingCount: number;
   position: number;
+  /** Used only for deterministic SKU references; never free text. */
+  sku?: string;
 };
 
 export type LastCartSummary = {
@@ -77,6 +79,8 @@ export type AgentGraphState = {
   toolCalls: ToolCallRecord[];
   productFooter: ProductFooterItem[];
   orderFooter: OrderFooterItem[];
+  /** Cart state for this turn's footer; reset per turn, unlike `lastCartSummary`. */
+  cartFooter: LastCartSummary;
   flaggedToolOutputs: number;
   model: string;
   provider: string;
@@ -100,6 +104,7 @@ export type AgentGraphInput = Pick<
   | 'toolCalls'
   | 'productFooter'
   | 'orderFooter'
+  | 'cartFooter'
   | 'flaggedToolOutputs'
   | 'model'
   | 'provider'

@@ -1,9 +1,11 @@
 import { Annotation, type BaseCheckpointSaver, END, START, StateGraph } from '@langchain/langgraph';
 import { isTurnAborted } from '../common/turn-abort';
 import type { ChatMessage } from '../model-gateway/model-gateway.service';
+import { parseCartIntent, summaryToListedProducts } from './agent.cart';
 import { AGENT_COPY, AGENT_POLICY, AGENT_PROMPT_VERSIONS, type AgentPolicy } from './agent.policy';
 import {
   buildSpecialistContext,
+  CART_SYSTEM_PROMPT,
   HISTORY_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
   SEARCH_SYSTEM_PROMPT,
@@ -18,6 +20,7 @@ import type {
   AgentModelCall,
   AgentRoute,
   ImplementedAgent,
+  LastCartSummary,
   LastOrder,
   ListedProduct,
   OrderFooterItem,
@@ -62,6 +65,10 @@ const AgentState = Annotation.Root({
   toolCalls: Annotation<ToolCallRecord[]>,
   productFooter: Annotation<ProductFooterItem[]>,
   orderFooter: Annotation<OrderFooterItem[]>,
+  cartFooter: Annotation<LastCartSummary>({
+    reducer: (_left, right) => right,
+    default: () => null,
+  }),
   flaggedToolOutputs: Annotation<number>,
   model: Annotation<string>,
   provider: Annotation<string>,
@@ -88,17 +95,18 @@ export function createAgentGraph(deps: AgentGraphDeps, checkpointer?: BaseCheckp
     .addNode('router', (state) => routeNode(state, deps))
     .addNode('search', (state) => specialistNode('search', state, deps))
     .addNode('review', (state) => specialistNode('review', state, deps))
+    .addNode('cart', (state) => specialistNode('cart', state, deps))
     .addNode('history', (state) => specialistNode('history', state, deps))
     .addNode('clarify', (state) => clarifyNode(state))
     .addEdge(START, 'router')
     .addConditionalEdges(
       'router',
-      (state): ImplementedAgent =>
-        state.route === 'cart' || state.route === 'order' ? 'clarify' : state.route,
-      { search: 'search', review: 'review', history: 'history', clarify: 'clarify' },
+      (state): ImplementedAgent => (state.route === 'order' ? 'clarify' : state.route),
+      { search: 'search', review: 'review', cart: 'cart', history: 'history', clarify: 'clarify' },
     )
     .addEdge('search', END)
     .addEdge('review', END)
+    .addEdge('cart', END)
     .addEdge('history', END)
     .addEdge('clarify', END);
 
@@ -174,19 +182,18 @@ async function routeNode(state: State, deps: AgentGraphDeps): Promise<Partial<St
 
 function clarifyNode(state: State): Partial<State> {
   const reply =
-    state.route === 'cart'
-      ? AGENT_COPY.cartNotAvailable
-      : state.route === 'order'
-        ? AGENT_COPY.orderNotAvailable
-        : state.routeSource === 'heuristic' && state.routeConfidence <= 0.5
-          ? AGENT_COPY.offTopic
-          : AGENT_COPY.clarify;
+    state.route === 'order'
+      ? AGENT_COPY.orderNotAvailable
+      : state.routeSource === 'heuristic' && state.routeConfidence <= 0.5
+        ? AGENT_COPY.offTopic
+        : AGENT_COPY.clarify;
 
   return {
     reply,
     toolCalls: [],
     productFooter: [],
     orderFooter: [],
+    cartFooter: null,
     flaggedToolOutputs: 0,
     promptVersion: AGENT_PROMPT_VERSIONS.clarify,
   };
@@ -200,6 +207,7 @@ type ToolAccumulator = {
   orders: OrderFooterItem[];
   lastListedProducts?: ListedProduct[];
   lastOrder?: LastOrder;
+  cartSummary: LastCartSummary;
   flagged: number;
   reviewCount: number;
   fallbackText: string;
@@ -210,6 +218,7 @@ function emptyAccumulator(): ToolAccumulator {
     records: [],
     products: [],
     orders: [],
+    cartSummary: null,
     flagged: 0,
     reviewCount: 0,
     fallbackText: '',
@@ -225,7 +234,7 @@ async function specialistNode(
   const specs = deps.tools.specsFor(agent);
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(agent) },
-    { role: 'user', content: buildSpecialistUserMessage(state, policy) },
+    { role: 'user', content: buildSpecialistUserMessage(agent, state, policy) },
   ];
   const accumulator = emptyAccumulator();
   const context = {
@@ -373,6 +382,8 @@ function finish(
     toolCalls: accumulator.records,
     productFooter: accumulator.products,
     orderFooter: accumulator.orders,
+    // Footer is per-turn; `lastCartSummary` persists only after a cart tool.
+    cartFooter: accumulator.cartSummary,
     flaggedToolOutputs: accumulator.flagged,
     model,
     provider,
@@ -381,6 +392,7 @@ function finish(
       ? { lastListedProducts: accumulator.lastListedProducts }
       : {}),
     ...(accumulator.lastOrder ? { lastOrder: accumulator.lastOrder } : {}),
+    ...(accumulator.cartSummary ? { lastCartSummary: accumulator.cartSummary } : {}),
   };
 }
 
@@ -415,6 +427,25 @@ async function deterministicFallback(
     };
   }
 
+  if (agent === 'cart') {
+    const intent = parseCartIntent(
+      state.message,
+      state.lastListedProducts,
+      summaryToListedProducts(state.lastCartSummary),
+    );
+    if ('needsClarification' in intent) return { terminal: intent.question };
+    if (intent.action === 'view') {
+      return {
+        name: 'view_cart',
+        args: {},
+        execution: await deps.tools.execute('view_cart', {}, context),
+      };
+    }
+    const args = { productId: intent.product.id, qty: intent.qty };
+    const name = intent.action === 'add' ? 'add_to_cart' : 'update_cart_item';
+    return { name, args, execution: await deps.tools.execute(name, args, context) };
+  }
+
   const reference = resolveProductReference(state.message, state.lastListedProducts);
   if (!reference) {
     return {
@@ -440,6 +471,11 @@ function defaultReply(agent: ImplementedAgent, accumulator: ToolAccumulator): st
       ? AGENT_COPY.noProducts
       : AGENT_COPY.searchFallbackIntro;
   }
+  if (agent === 'cart') {
+    return accumulator.cartSummary && accumulator.cartSummary.items.length > 0
+      ? AGENT_COPY.cartFallbackIntro
+      : AGENT_COPY.cartEmpty;
+  }
   if (agent === 'history') {
     return accumulator.orders.length === 0 ? AGENT_COPY.noOrders : AGENT_COPY.historyFallbackIntro;
   }
@@ -464,6 +500,7 @@ function mergeExecution(
     );
   }
   if (execution.lastOrder) accumulator.lastOrder = execution.lastOrder;
+  if (execution.cartSummary !== undefined) accumulator.cartSummary = execution.cartSummary;
   if (execution.products) {
     accumulator.products = mergeById(
       accumulator.products,
@@ -491,10 +528,15 @@ function mergeById<T extends { id: string }>(current: T[], next: T[], limit: num
 function systemPrompt(agent: ImplementedAgent): string {
   if (agent === 'search') return SEARCH_SYSTEM_PROMPT;
   if (agent === 'review') return REVIEW_SYSTEM_PROMPT;
+  if (agent === 'cart') return CART_SYSTEM_PROMPT;
   return HISTORY_SYSTEM_PROMPT;
 }
 
-function buildSpecialistUserMessage(state: State, policy: AgentPolicy): string {
+function buildSpecialistUserMessage(
+  agent: ImplementedAgent,
+  state: State,
+  policy: AgentPolicy,
+): string {
   const history = state.recentMessages
     .slice(-policy.specialistHistoryTurns)
     .map(
@@ -506,7 +548,7 @@ function buildSpecialistUserMessage(state: State, policy: AgentPolicy): string {
     )
     .join('\n');
 
-  return `${buildSpecialistContext(state)}
+  return `${buildSpecialistContext(state, agent)}
 
 Recent conversation (redacted):
 ${history.length > 0 ? history : '(none)'}
