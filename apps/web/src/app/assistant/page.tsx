@@ -10,8 +10,8 @@ export default function AssistantPage() {
         <p className="text-sm font-medium text-accent">AI assistant</p>
         <h1 className="font-display text-3xl font-semibold tracking-tight">Assistant</h1>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Find products, summarize customer reviews, and look up your orders in plain language. The
-          assistant acts directly and reports what it found.
+          Find products, summarize customer reviews, manage your cart, and look up your orders in
+          plain language. The assistant acts directly and reports what it found.
         </p>
       </header>
 

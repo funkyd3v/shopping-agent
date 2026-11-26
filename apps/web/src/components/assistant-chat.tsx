@@ -9,14 +9,14 @@ const CONFIG: ChatPanelConfig = {
   assistantLabel: 'Assistant',
   inputLabel: 'Your message',
   placeholder: 'e.g. Find wireless headphones under $80',
-  hint: 'Search products, summarize reviews, and look up your orders.',
+  hint: 'Search products, summarize reviews, manage your cart, and look up your orders.',
   authMessage: 'Sign in to chat with the assistant and keep your conversation.',
-  emptyTitle: 'Ask about products, reviews, or orders',
+  emptyTitle: 'Ask about products, reviews, cart, or orders',
   emptyDescription: (
     <>
-      Try a product search, then ask a follow-up like “summarize reviews for the second one”, or
-      look up your order history. The assistant handles one request per turn; combine steps across
-      turns. For shipping, returns, and other policies, use{' '}
+      Try a product search, then ask a follow-up like “summarize reviews for the second one” or “add
+      it to my cart”. You can also look up your order history. The assistant handles one request per
+      turn; combine steps across turns. For shipping, returns, and other policies, use{' '}
       <Link
         href="/help"
         className="font-medium text-accent underline underline-offset-4 hover:text-accent/80"
@@ -28,8 +28,9 @@ const CONFIG: ChatPanelConfig = {
   ),
   examples: [
     'Find wireless headphones under $80',
+    'Add the second one to my cart',
+    'Show my cart',
     'Show my last orders',
-    'Find a laptop under $1000',
   ],
   errorFallback: 'Unable to reach the assistant right now. Please try again.',
 };
