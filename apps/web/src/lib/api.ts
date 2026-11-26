@@ -3,6 +3,7 @@ import type {
   Cart,
   ChatMessagesResponse,
   ChatRequest,
+  ChatSessionKind,
   ChatSessionList,
   LoginInput,
   OrderDetail,
@@ -155,8 +156,8 @@ export const chatApi = {
    * POST the turn and return the raw SSE response. Non-2xx bodies are JSON
    * (validation, auth, or 409) and are surfaced as `ApiError`.
    */
-  async stream(input: ChatRequest, signal: AbortSignal): Promise<Response> {
-    const response = await fetch('/api/rag/chat', {
+  async stream(kind: ChatSessionKind, input: ChatRequest, signal: AbortSignal): Promise<Response> {
+    const response = await fetch(`/api/${kind}/chat`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
