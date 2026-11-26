@@ -77,6 +77,11 @@ export const envSchema = z.object({
   RAG_TOP_K: int(5, 1, 10),
   RAG_MAX_DISTANCE: float(0.38, 0, 2),
 
+  // Read-only agent limits (PLAN §8). Defaults mirror agent.policy.ts.
+  AGENT_MAX_MODEL_CALLS: int(6, 1, 12),
+  AGENT_MAX_TOOL_CALLS: int(4, 1, 10),
+  AGENT_ROUTER_MIN_CONFIDENCE: float(0.55, 0, 1),
+
   // Database
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required (e.g. file:./data/app.db)'),
   CHECKPOINT_DATABASE_PATH: z.string().min(1).default('./data/checkpoints.db'),

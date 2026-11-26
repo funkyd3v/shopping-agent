@@ -24,23 +24,41 @@ export class CassetteStore {
   }
 
   load(key: string): string | null {
+    const data = this.loadJson(key);
+    if (!data || typeof data !== 'object') return null;
+    const content = (data as { content?: unknown }).content;
+    return typeof content === 'string' ? content : null;
+  }
+
+  save(key: string, content: string): void {
+    this.saveJson(key, { content });
+  }
+
+  /** Tool-calling cassettes keep both text and normalized tool calls. */
+  loadJson(key: string): unknown | null {
     if (!this.enabled) return null;
     const file = join(this.dir, `${key}.json`);
     if (!existsSync(file)) return null;
     try {
-      const data = JSON.parse(readFileSync(file, 'utf8')) as { content?: string };
-      return typeof data.content === 'string' ? data.content : null;
+      return JSON.parse(readFileSync(file, 'utf8')) as unknown;
     } catch {
       return null;
     }
   }
 
-  save(key: string, content: string): void {
+  saveJson(key: string, value: unknown): void {
     if (!this.enabled) return;
     const file = join(this.dir, `${key}.json`);
     try {
       mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, JSON.stringify({ content, savedAt: new Date().toISOString() }, null, 2));
+      writeFileSync(
+        file,
+        JSON.stringify(
+          { ...(value as Record<string, unknown>), savedAt: new Date().toISOString() },
+          null,
+          2,
+        ),
+      );
     } catch (err) {
       this.logger.warn(`Failed to write cassette ${key}: ${String(err)}`);
     }

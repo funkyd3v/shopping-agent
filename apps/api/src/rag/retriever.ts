@@ -1,3 +1,5 @@
+export { isTurnAborted, TurnAbortedError } from '../common/turn-abort';
+
 /** Retrieved policy chunk with cosine distance (lower is better). */
 export type RetrievedChunk = {
   id: string;
@@ -22,15 +24,4 @@ export class RetrievalUnavailableError extends Error {
     super(message);
     this.name = 'RetrievalUnavailableError';
   }
-}
-
-export class TurnAbortedError extends Error {
-  constructor() {
-    super('Turn aborted');
-    this.name = 'TurnAbortedError';
-  }
-}
-
-export function isTurnAborted(error: unknown): boolean {
-  return error instanceof TurnAbortedError;
 }

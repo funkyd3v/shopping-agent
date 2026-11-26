@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { CassetteStore } from './cassette.store.js';
 import {
   type ChatMessage,
@@ -165,5 +166,61 @@ describe('ModelGatewayService', () => {
       service(invoke).generate({ chain: 'router', messages, signal: controller.signal }),
     ).rejects.toMatchObject({ code: 'ABORTED' });
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  describe('generateWithTools', () => {
+    const tools = [
+      {
+        name: 'search_products',
+        description: 'Search the catalog',
+        schema: z.object({ query: z.string().optional() }),
+      },
+    ];
+
+    it('returns normalized tool calls from the primary model', async () => {
+      const toolInvoke = vi.fn(async () => ({
+        content: '',
+        toolCalls: [{ name: 'search_products', args: '{"query":"headphones"}' }],
+      }));
+      const gateway = new ModelGatewayService(new CassetteStore(), undefined, toolInvoke as never);
+
+      const result = await gateway.generateWithTools({
+        chain: 'agent',
+        messages,
+        tools,
+        temperature: 0.2,
+      });
+
+      expect(result.provider).toBe('groq');
+      expect(result.toolCalls).toEqual([
+        { id: 'call_1', name: 'search_products', args: { query: 'headphones' } },
+      ]);
+      expect(toolInvoke).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to the next model when tool calling fails', async () => {
+      const calls: string[] = [];
+      const toolInvoke = vi.fn(async ({ provider }: { provider: string }) => {
+        calls.push(provider);
+        if (provider === 'groq') throw new Error('tool calling unavailable');
+        return { content: 'fallback answer', toolCalls: [] };
+      });
+      const gateway = new ModelGatewayService(new CassetteStore(), undefined, toolInvoke as never);
+
+      const result = await gateway.generateWithTools({ chain: 'agent', messages, tools });
+
+      expect(result.provider).toBe('gemini');
+      expect(result.toolCalls).toEqual([]);
+      expect(calls).toEqual(['groq', 'gemini']);
+    });
+
+    it('fails with NO_CASSETTE in replay mode', async () => {
+      process.env.LLM_MODE = 'replay';
+      const gateway = new ModelGatewayService(new CassetteStore());
+
+      await expect(
+        gateway.generateWithTools({ chain: 'agent', messages, tools }),
+      ).rejects.toMatchObject({ code: 'NO_CASSETTE' });
+    });
   });
 });
