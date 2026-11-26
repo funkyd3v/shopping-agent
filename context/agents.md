@@ -51,8 +51,8 @@ START → input_guardrails → router ─┬→ search ─┐
 - Specialists: ≤4 tools (prefer 3). Checkpointer: separate SQLite DB, thread id `${userId}:${sessionId}`, recursion limit ~25. Max model/tool calls per run.
 - **No confirmation, no interrupts.** Side effects gated by the resolver.
 
-**Implemented (Phases 4–5):**
-- Graph: `router` → exactly one of `search` / `review` / `cart` / `history` / `clarify`; the `order` route renders page copy until Phase 6.
+**Implemented (Phases 4–6):**
+- Graph: `router` → exactly one of `search` / `review` / `cart` / `order` / `history` / `clarify`. An order mutation runs at most once per turn; the write service also enforces one order per turn via `unique(user_id, turn_id)`.
 - Cart (Phase 5): exactly three tools (`view_cart`, `add_to_cart`, `update_cart_item`) calling `CartService`. `agent.cart.ts` resolves action/product/quantity from the user message; the tool re-runs it and rejects mismatched model args (`NEEDS_CLARIFICATION`/`INTENT_UNRESOLVED`); non-committal language never commits. A server-generated cart footer (lines, qty, unit price, line total, subtotal, `/cart`) is appended per turn.
 - Router confidence `AGENT_ROUTER_MIN_CONFIDENCE=0.55`; below it, a deterministic keyword/pattern heuristic decides, so a provider failure still yields a useful route.
 - Tools call `ProductSearchService` / `OrderService`; no raw SQL, no identity parameters. Outputs are untrusted envelopes with a flag scan and a `maxToolOutputChars` cap.
@@ -110,6 +110,8 @@ Identity is injected from request context, never a tool parameter; all args are 
 | History | `get_order` | `orderId` | order + items + link |
 
 Tool outputs are `{ trust: 'untrusted', source, data }`. `quote_order` is for price/availability questions; `place_order`/`checkout_cart` return structured refusals with quote details on limit/stock failure. Review summaries come from the review agent, not a hidden tool.
+
+**Order agent (Phase 6):** `agent.order.ts` resolves cancel → checkout → quote → direct place from the user's message and structured state only (`lastListedProducts`, `lastOrder`). Cancel accepts an `ORD-…` number or "cancel it" after `lastOrder` was raised; non-committal language never commits; multiple ordinals/no list clarify. The four tools re-run the resolver and reject mismatched args with `NEEDS_CLARIFICATION` / `INTENT_UNRESOLVED`. Identity, `turnId`, and `clientMessageId` come from `ToolContext`, never tool arguments. Prompt versions: router `agent-router-v3`, order `agent-order-v1`.
 
 ## Deterministic intent resolver
 

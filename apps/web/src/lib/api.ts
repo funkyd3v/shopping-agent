@@ -5,6 +5,7 @@ import type {
   ChatRequest,
   ChatSessionKind,
   ChatSessionList,
+  CheckoutRequest,
   LoginInput,
   OrderDetail,
   OrderList,
@@ -104,6 +105,13 @@ export const cartApi = {
     }),
 
   clear: () => request<{ cart: Cart }>('/api/cart', { method: 'DELETE' }),
+
+  /** Each click gets one clientRequestId; reuse it on retry for idempotency. */
+  checkout: (input: CheckoutRequest) =>
+    request<{ order: OrderDetail }>('/api/cart/checkout', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
 };
 
 export type OrderQuery = {
@@ -123,6 +131,11 @@ export const orderApi = {
   },
 
   get: (id: string) => request<OrderDetail>(`/api/orders/${encodeURIComponent(id)}`),
+
+  cancel: (id: string) =>
+    request<{ order: OrderDetail }>(`/api/orders/${encodeURIComponent(id)}/cancel`, {
+      method: 'POST',
+    }),
 };
 
 export const authApi = {

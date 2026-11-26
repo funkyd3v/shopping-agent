@@ -165,6 +165,16 @@ export function OrdersBrowser() {
                         {order.orderNumber}
                       </span>
                       <OrderStatusBadge status={order.status} />
+                      {order.placedBy === 'agent' ? (
+                        <span className="rounded-full border border-accent/25 bg-accent-soft px-2.5 py-0.5 text-xs font-medium text-accent">
+                          AI assistant
+                        </span>
+                      ) : null}
+                      {order.source === 'cart' ? (
+                        <span className="rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                          From cart
+                        </span>
+                      ) : null}
                     </div>
                     <p className="text-sm text-muted-foreground">
                       Placed {formatDate(order.createdAt)} · {order.itemCount}{' '}

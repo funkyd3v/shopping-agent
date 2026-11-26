@@ -33,6 +33,7 @@ Source: PLAN.md §9.
 3. On failure (empty cart, out of stock, over limit, no address): roll back, keep cart unchanged, return a structured refusal (`code`, `limit`, `actual`, `allowed`, available quantities).
 4. Idempotency key is server-derived from `(userId, kind='cart', clientMessageId or clientRequestId)` and checked before loading the cart. Do not include cart contents in the key. A retry returns the existing order, even if the cart is now empty.
 5. Receipt is server-generated: order number, items, qty, unit price, total, status, cancel deadline, link.
+- **Implemented (Phase 6):** `CheckoutService` resolves the cart inside one `OrderWriteService` transaction. Key is `cart:<clientRequestId>` (page) or `cart:<clientMessageId>` (chat). `/cart` Checkout reuses one browser-generated id across retries and navigates to `/orders/:id`.
 
 ## Direct order (`place_order`)
 
@@ -41,6 +42,7 @@ Source: PLAN.md §9.
 - Key from `(userId, kind='direct', clientMessageId)`; retry returns the original order.
 - `source='direct'`; does not touch the cart.
 - One order per chat turn (`unique(user_id, turn_id)`); two orders require two turns.
+- **Implemented (Phase 6):** `OrderService.placeDirect`; key is `direct:<clientMessageId>`. The `order` agent exposes `quote_order` / `place_order` / `checkout_cart` / `cancel_order`, each re-running `agent.order.ts` on the user's own message and rejecting model arguments that disagree. At most one order mutation runs per graph turn.
 
 ## Shared order limits
 
@@ -61,6 +63,7 @@ Source: PLAN.md §9.
 - Another user's order → 404 (not 403) to avoid enumeration.
 - Idempotent: cancelling an already-cancelled order returns its current state (200).
 - Receipt footer shows the new status and "cancelled".
+- **Implemented (Phase 6):** `OrderWriteService.cancelOrder` does the guarded `updateMany` + restock in one transaction, is idempotent for already-cancelled orders, and returns 404 for another user's order. `POST /orders/:id/cancel` and the `/orders/:id` Cancel button both use it.
 
 ## Edge cases
 

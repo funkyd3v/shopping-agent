@@ -1,7 +1,8 @@
 'use client';
 
-import type { Cart, CartLine } from '@shopping-agent/shared';
+import type { Cart, CartLine, OrderDetail } from '@shopping-agent/shared';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ApiError, cartApi } from '@/lib/api';
 import { notifyCartUpdated } from '@/lib/cart-events';
@@ -10,11 +11,14 @@ import { ProductThumb } from './product-thumb';
 import { SignInPanel } from './products-browser';
 
 export function CartView() {
+  const router = useRouter();
   const [cart, setCart] = useState<Cart | null>(null);
   const [loading, setLoading] = useState(true);
   const [authRequired, setAuthRequired] = useState(false);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string | null>(null);
+  /** One id per checkout click, reused on retry so a retry cannot double-order. */
+  const [checkoutRequestId, setCheckoutRequestId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -53,6 +57,26 @@ export function CartView() {
             : 'Unable to update your cart right now. Please try again.',
         );
       }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function checkout(): Promise<void> {
+    const key = checkoutRequestId ?? newClientRequestId();
+    setCheckoutRequestId(key);
+    setBusy('checkout');
+    setError(undefined);
+    try {
+      const { order }: { order: OrderDetail } = await cartApi.checkout({ clientRequestId: key });
+      notifyCartUpdated();
+      router.push(`/orders/${encodeURIComponent(order.id)}`);
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError
+          ? caught.message
+          : 'Unable to place your order right now. Please try again.',
+      );
     } finally {
       setBusy(null);
     }
@@ -167,11 +191,17 @@ export function CartView() {
                 </dd>
               </div>
             </dl>
-            <button type="button" disabled className="btn btn-primary w-full">
-              Checkout
+            <button
+              type="button"
+              onClick={() => void checkout()}
+              disabled={busy !== null}
+              className="btn btn-primary w-full"
+            >
+              {busy === 'checkout' ? 'Placing order…' : 'Checkout'}
             </button>
             <p className="text-xs text-muted-foreground">
-              Checkout is coming soon. Your cart is saved to your account.
+              Demo store — payments are mocked. Checkout places a real order record and reserves
+              stock; no payment is taken.
             </p>
             <p className="text-xs text-muted-foreground">
               Per-order limit: {formatUsd(cart.limits.maxOrderCents)} · up to{' '}
@@ -182,6 +212,13 @@ export function CartView() {
       )}
     </div>
   );
+}
+
+function newClientRequestId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `co-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function CartLineRow({

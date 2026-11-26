@@ -17,6 +17,8 @@ type State =
 
 export function OrderDetailView({ id }: { id: string }) {
   const [state, setState] = useState<State>({ status: 'loading' });
+  const [cancelling, setCancelling] = useState(false);
+  const [actionError, setActionError] = useState<string>();
 
   useEffect(() => {
     let active = true;
@@ -44,6 +46,23 @@ export function OrderDetailView({ id }: { id: string }) {
       active = false;
     };
   }, [id]);
+
+  async function cancel(): Promise<void> {
+    setCancelling(true);
+    setActionError(undefined);
+    try {
+      const { order } = await orderApi.cancel(id);
+      setState({ status: 'ready', order });
+    } catch (caught) {
+      setActionError(
+        caught instanceof ApiError
+          ? caught.message
+          : 'Unable to cancel this order right now. Please try again.',
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   if (state.status === 'loading') return <OrderDetailSkeleton />;
   if (state.status === 'auth') {
@@ -82,7 +101,26 @@ export function OrderDetailView({ id }: { id: string }) {
           </p>
         </div>
         <OrderStatusBadge status={order.status} />
+        {order.placedBy === 'agent' ? (
+          <span className="rounded-full border border-accent/25 bg-accent-soft px-2.5 py-0.5 text-xs font-medium text-accent">
+            AI assistant
+          </span>
+        ) : null}
+        {order.source === 'cart' ? (
+          <span className="rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+            From cart
+          </span>
+        ) : null}
       </header>
+
+      {actionError ? (
+        <p
+          role="alert"
+          className="rounded-xl border border-destructive/25 bg-destructive-soft p-4 text-sm text-destructive"
+        >
+          {actionError}
+        </p>
+      ) : null}
 
       {order.status === 'cancelled' && order.cancelledAt ? (
         <p className="rounded-xl border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
@@ -157,6 +195,16 @@ export function OrderDetailView({ id }: { id: string }) {
             <p className="mt-4 text-xs text-muted-foreground">
               Demo order — payments are mocked and no real charge was made.
             </p>
+            {order.cancellable ? (
+              <button
+                type="button"
+                onClick={() => void cancel()}
+                disabled={cancelling}
+                className="btn btn-secondary mt-4 w-full text-sm"
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel order'}
+              </button>
+            ) : null}
           </section>
 
           <section className="card p-5" aria-labelledby="order-address-heading">
