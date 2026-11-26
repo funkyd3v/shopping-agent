@@ -157,3 +157,24 @@ ADR-lite log. Append only. Format: date, status, decision, why, alternatives.
 **Decision:** Final Phase 3 evidence was produced with a local `chromadb==1.5.9` server on `127.0.0.1:8000` because the Docker daemon was not available in the session. The pinned `chromadb/chroma:1.5.9` compose service, collection metadata, and client contract are unchanged.
 **Why:** The RAG gate needs a real index; hiding the environment limitation would leave the calibration unverifiable. The server version matches the pinned image, and the index was rebuilt from `content/policies` with `pnpm rag:ingest` (52 chunks, 7 sources).
 **Alternatives:** skip the live eval (rejected: the phase gate explicitly requires a reported hit rate); mock retrieval (rejected: would not validate distances or the real Chroma API).
+
+## 2026-11-26 — Read-only agents: router confidence + deterministic fallbacks
+
+**Status:** accepted
+**Decision:** Build Phase 4 as a LangGraph `router` → one of `search` / `review` / `history` / `clarify`. The model route is accepted only at confidence ≥ `AGENT_ROUTER_MIN_CONFIDENCE` (default 0.55); otherwise a deterministic keyword/pattern heuristic chooses the route. If a specialist's model call fails or returns no tool call, code runs a deterministic fallback tool (`search_products`, `list_orders`, or `get_reviews` from `lastListedProducts`) and asks the model only to phrase the result.
+**Why:** The phase gate requires search/review/history to work through `/assistant` without letting a small model invent products, IDs, or links. A code fallback keeps the feature usable when routing or tool-calling fails and preserves the rule that the LLM cannot bypass deterministic references.
+**Alternatives:** trust every router decision (rejected: low-confidence guesses misroute); fail the turn on a missing tool call (rejected: a provider hiccup would break read-only search/history); let the model resolve "the second one" itself (rejected: ordinal references must resolve against server-held `lastListedProducts`).
+
+## 2026-11-26 — Agent checkpointer and `agent_runs` audit
+
+**Status:** accepted
+**Decision:** Persist LangGraph checkpoints in a separate SQLite file (`CHECKPOINT_DATABASE_PATH`, default `./data/checkpoints.db`) with thread id `${userId}:${sessionId}`, and write one `agent_runs` row per turn containing route, model, provider, prompt version, tool-call JSON, status/error code, and duration. Model calls also record `token_usage`; guardrail actions write `guardrail_events`.
+**Why:** PLAN §8/§15 requires per-turn agent auditing and bounded conversational state. Keeping checkpoints out of the application DB avoids mixing graph internals with domain tables, and the audit row makes routing/tool behavior inspectable after a live smoke or incident.
+**Alternatives:** store checkpoints in the main DB (rejected: schema coupling and larger backups); log only to pino (rejected: not queryable per session/turn); skip prompt versions (rejected: cannot correlate quality with prompt changes).
+
+## 2026-11-26 — Shared chat UI and safe chat links
+
+**Status:** accepted
+**Decision:** Use one generic `ChatPanel` for `/help` and `/assistant`, parameterized by endpoint kind, copy, examples, and source rendering. Assistant text is rendered as plain markdown with links filtered by `isSafeChatHref`; only `/products/:id`, `/cart`, `/orders/:id`, `/help`, `/assistant`, or `https:` links survive. `parseChatLinks` consumes balanced parentheses in markdown targets so an unsafe target is dropped whole.
+**Why:** PLAN §10/§12 forbids agent-specific UI and unsafe model-authored links. A shared panel keeps the two chats consistent and avoids duplicating stream, history, Stop, and error handling. Balanced-parenthesis parsing prevents a partial URL (e.g. a trailing `)`) from slipping through the allowlist.
+**Alternatives:** separate help/assistant components (rejected: duplicated lifecycle logic); render markdown HTML (rejected: XSS risk); allow all relative links (rejected: model could point at arbitrary app routes).

@@ -51,6 +51,16 @@ START → input_guardrails → router ─┬→ search ─┐
 - Specialists: ≤4 tools (prefer 3). Checkpointer: separate SQLite DB, thread id `${userId}:${sessionId}`, recursion limit ~25. Max model/tool calls per run.
 - **No confirmation, no interrupts.** Side effects gated by the resolver.
 
+**Implemented (Phase 4, read-only):**
+- Graph: `router` → exactly one of `search` / `review` / `history` / `clarify`; `cart`/`order` routes render page copy until Phase 5/6.
+- Router confidence `AGENT_ROUTER_MIN_CONFIDENCE=0.55`; below it, a deterministic keyword/pattern heuristic decides, so a provider failure still yields a useful route.
+- Tools call `ProductSearchService` / `OrderService`; no raw SQL, no identity parameters. Outputs are untrusted envelopes with a flag scan and a `maxToolOutputChars` cap.
+- Deterministic fallbacks: search parses query/price/category; history lists 5 orders; review resolves an ordinal/name/id from `lastListedProducts`. The model only writes prose from tool results.
+- Product/order footers are server-generated (`/products/:id`, `/orders/:id`); the model must not restate IDs/totals.
+- Checkpointer: `CHECKPOINT_DATABASE_PATH` (default `./data/checkpoints.db`), thread `${userId}:${sessionId}`, recursion limit 25, per-turn caps `AGENT_MAX_MODEL_CALLS=6`, `AGENT_MAX_TOOL_CALLS=4`.
+- `/agent/chat`: same buffered-SSE lifecycle as RAG (replay, per-session 409, persist-before-stream) plus `agent_runs` audit and per-call `token_usage`.
+- `/assistant` uses the shared `ChatPanel`; no agent-specific UI. Chat markdown links are filtered to `/products/:id`, `/cart`, `/orders/:id`, `/help`, `/assistant`, or https.
+
 ## Shared state (bounded)
 
 ```ts
