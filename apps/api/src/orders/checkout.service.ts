@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { OrderDetail } from '@shopping-agent/shared';
-import type { OrderActor, OrderWriteService } from './order-write.service';
+import { type OrderActor, OrderWriteService } from './order-write.service';
 
 /**
  * Cart → order checkout (PLAN §9.3). All policy lives in `OrderWriteService`;

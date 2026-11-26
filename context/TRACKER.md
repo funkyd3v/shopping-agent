@@ -15,10 +15,10 @@
 
 ## Now
 
-- **Phase:** 6 — Order agent and checkout ✅ (closed 2026-11-26; `pnpm run ci` green)
-- **Next action:** start Phase 7 — guardrails/evals/polish (PLAN §10, §16): jailbreak classifier, PII false-positive eval, `eval:guardrails`/`eval:agents`, demo script and README runbook.
+- **Phase:** 7 — Guardrails, evals, polish ✅ (closed 2026-11-26; `pnpm run ci` green)
+- **Next action:** none for the MVP. Optional: nightly live jailbreak/PII classifier eval with provider keys.
 - **Blockers:** none. Chroma is only needed for live `/help` or `pnpm eval:rag`; the verified index has 52 chunks.
-- **Open decisions:** none blocking. Cancel window is 30 minutes; REST cancel and chat cancel both landed in Phase 6.
+- **Open decisions:** none blocking. Free-tier TPM/RPD still unmeasured (see blockers below).
 
 ## Done so far
 
@@ -42,17 +42,20 @@
 | 4 — Read-only Agents | ✅ | Search/review/history via `/assistant`; `agent_runs` recorded; retry deduped | live search→review→orders footers; replay same `clientMessageId`; concurrent 409; CI green |
 | 5 — Cart | ✅ | UI + chat cart ops; limits; persistence; cross-user 404 | chat add/view/update/remove with footer; qty 5 ok / 6 refused; 20-line cap; CI green |
 | 6 — Order and Checkout | ✅ | Direct order + cart checkout + limits + cancel + injection tests | 283 API + 12 web tests; idempotent replay; concurrent checkout serialized; malicious review cannot order; CI green |
-| 7 — Guardrails, Evals, Polish | ⬜ | Eval targets met; malicious review cannot order; demo script; CI green | — |
+| 7 — Guardrails, Evals, Polish | ✅ | Eval targets met; malicious review cannot order; demo script; CI green | jailbreak 100% block / 0% FPR; PII 100% / 0% FPR; agents 15/15; smoke 10 pass / 0 fail; 336 API + 12 web tests |
 
-## Phase 6 checklist
+## Phase 7 checklist
 
-- [x] `OrderWriteService` + `CheckoutService`: process-wide write mutex, one interactive transaction, repricing, stock decrement (all-or-nothing), snapshots, audit rows and structured refusals
-- [x] Server-derived idempotency (`direct:` / `cart:`), one order per turn via `unique(user_id, turn_id)`, retry returns the original order
-- [x] Deterministic limits ($200/order, qty ≤5, 5 agent orders/day, $500 spend/day) in `order-limits.ts`; cancel window + restock in `order-write.service.ts`
-- [x] `POST /cart/checkout`, `POST /orders/:id/cancel`, `PATCH /users/me/address`; cross-user 404; `/cart` Checkout button and `/orders` AI/From-cart badges + Cancel button wired
-- [x] Order agent route + four tools (`quote_order`, `place_order`, `checkout_cart`, `cancel_order`); resolver-gated args; one mutation per turn; identity/provenance injected from the turn
-- [x] Server-generated receipt footer (items, qty, unit price, total, status, cancel deadline, `/orders/:id`); router/order prompt versions bumped; no agent-specific UI
-- [x] Tests: limits, mutex/concurrency, idempotency, cancel window, resolver, tool guards, malformed args, refusals, cross-turn malicious review, receipt footers; CI green (283 API + 12 web)
+- [x] Deterministic-first jailbreak pre-filter (history/tool scan, fail modes) wired before RAG/agent model calls; opt-in `guardrail` classifier; guardrail events on block/degrade
+- [x] Redundancy detection (normalized-token Jaccard + tool-loop cap) with explicit-repeat/receipt exemptions; short-circuit before footer/persist
+- [x] PII identifier protection (SKU/order IDs) removes 10-digit false positives; output mask unchanged
+- [x] Datasets + runners: `eval:guardrails` (jailbreak 52+49, PII 25, redundancy 10, orders 15, cart 14) and `eval:agents` (15 replay scenarios), JSON results for CI
+- [x] `pnpm guardrails:inspect` read-only audit; README runbook; `docs/demo-script.md`; `pnpm demo:smoke` executable smoke; `compose.demo.yml`
+- [x] Fixed latent Nest DI boot bug (type-only imports of injected `OrderWriteService`/`CheckoutService`); CI green (336 API + 12 web)
+
+## Phase 6 (condensed)
+
+- [x] Order write path (mutex, idempotency, limits, cancel/restock) + four-tool order agent; REST checkout/cancel wired; injection tests; 283 API tests at close.
 
 ## Phase 5 checklist (condensed)
 
@@ -97,6 +100,7 @@
 | 2026-11-26 | 5 | Cart service tests; Phase 5 closed | `apps/api/src/cart/cart.service.spec.ts` | Phase 6 |
 | 2026-11-26 | 6 | Order write path: limits, mutex, idempotency, checkout/cancel REST (committed as `bd28145`) | `apps/api/src/orders/**`, `apps/api/src/common/write-mutex.ts`, `packages/shared/src/{dto,orders}.ts` | Order agent |
 | 2026-11-26 | 6 | Order agent (resolver, 4 tools, receipt footers, graph node), web checkout/cancel/badges; CI green; Phase 6 closed | `apps/api/src/agent/agent.order.*`, `agent.{tools,graph,footer,policy,prompts,types}.ts`, `apps/web/src/{lib/api.ts,components/**}` | Phase 7 |
+| 2026-11-26 | 7 | Jailbreak/redundancy guardrails, offline eval datasets + runners, guardrail inspect, demo script/smoke, README/compose, DI boot fix; Phase 7 closed | `apps/api/src/{guardrails,evals,cart}/**`, `apps/api/scripts/**`, `evals/**`, `docs/demo-script.md`, `scripts/demo/**`, `compose.demo.yml` | nightly live evals |
 
 ## Blockers and open questions
 
@@ -104,7 +108,7 @@
 - **Embedding model:** `gemini-embedding-001` @768 is pinned; changing it requires `rag:ingest:reset`.
 - **Prisma drift:** `prisma migrate dev` sees the FTS5 shadow tables as drift; use hand-written migrations + `prisma migrate deploy`.
 - **Chroma in this environment:** Docker was unavailable; Phase 3 used a local `chromadb==1.5.9` server on `127.0.0.1:8000`. The app/compose contract is unchanged.
-- **Phase 7:** jailbreak eval targets and demo script are not measured yet.
+- **Phase 7:** offline targets met; the opt-in live classifier eval has not been run against provider keys.
 
 ## Update protocol
 

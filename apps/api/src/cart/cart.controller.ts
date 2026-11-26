@@ -12,7 +12,7 @@ import {
 } from '@shopping-agent/shared';
 import { CurrentUser, requireUserId } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import type { CheckoutService } from '../orders/checkout.service';
+import { CheckoutService } from '../orders/checkout.service';
 import { OrderRefusalError, PAGE_SESSION_ID, toHttpException } from '../orders/order-write.service';
 import { CartService } from './cart.service';
 

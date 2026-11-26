@@ -4,7 +4,7 @@ import { PrismaService } from '../db/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { decodeOrderCursor, encodeOrderCursor } from './order.cursor';
 import { toOrderDetail, toOrderSummary } from './order.mapper';
-import type { OrderActor, OrderLineInput, OrderWriteService } from './order-write.service';
+import { type OrderActor, type OrderLineInput, OrderWriteService } from './order-write.service';
 
 /**
  * Order reads (REST + agent tools) plus direct placement and cancellation.

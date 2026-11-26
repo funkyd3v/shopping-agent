@@ -199,3 +199,31 @@ ADR-lite log. Append only. Format: date, status, decision, why, alternatives.
 **Decision:** The `order` route has exactly four tools (`quote_order`, `place_order`, `checkout_cart`, `cancel_order`). `agent.order.ts` resolves action/product/quantity/order reference from the user's own message plus structured state (`lastListedProducts`, `lastOrder`) before any mutation; each tool re-runs it and rejects model arguments that disagree. One order mutation is allowed per graph turn, after which the specialist loop stops and uses the server's deterministic wording. Order receipt footers are built from `OrderDetail` after output guardrails and carry items, quantities, unit prices, total, status, cancel deadline (server local time), and `/orders/:id`; history rows keep the compact list format. Router bumped to `agent-router-v3`, order prompt `agent-order-v1`.
 **Why:** PLAN §8.5/§9 requires code — not the model — to authorize side effects, and prohibits raw review/product text from becoming a product or order reference. Stopping after one mutation prevents a model loop from attempting a second order in the same turn even before the DB constraint fires. Server-built receipts keep IDs, totals, and links out of model-authored prose.
 **Alternatives:** let the model call `OrderWriteService` directly (rejected: fabricated ids/quantities); ask for confirmation before orders (rejected: PLAN §18 forbids confirmation UI/steps); render receipts in the prompt (rejected: hallucinated totals/links); trust the model to stop after one tool call (rejected: tool loops could repeat a mutation).
+
+## 2026-11-26 — Deterministic-first jailbreak, opt-in live classifier
+
+**Status:** accepted
+**Decision:** `guardrails/jailbreak.ts` runs narrow regex rules on the current message on every turn. History and tool/retrieved text are scanned as untrusted data: they add reasons and a gray-zone score but cannot block a benign user by themselves; a bare compliance after an earlier injection does block. The small-model `guardrail` classifier only runs for gray-zone text when `JAILBREAK_LIVE_CLASSIFIER=true`; on failure, read-only chat is allowed and side-effect intent is blocked (policy fail mode).
+**Why:** The eval gate (≤2% FPR, 0 false blocks on core benign flows) must be measurable offline in CI. A pure pre-filter is reproducible, cost-free, and still catches the cross-turn malicious-review scenario; the opt-in model adds coverage for novel attacks without making tests depend on keys.
+**Alternatives:** live-only classifier (rejected: targets unmeasurable offline); regex-only with no upgrade path (rejected: PLAN §10.2 specifies a small-model classifier).
+
+## 2026-11-26 — Redundancy short-circuit and receipt exemptions
+
+**Status:** accepted
+**Decision:** `guardrails/redundancy.ts` compares normalized-token Jaccard against recent assistant replies (≥0.9) and counts identical tool signatures (cap 2). Explicit re-requests and any cart/order tool on the turn are exempt. A hit returns short fixed copy before footer/persist; no regeneration.
+**Why:** PLAN §10.2 requires a code-enforced short-circuit, but a naive similarity check would suppress legitimate receipts and "say that again" flows. Tool-derived receipts are built server-side, so exempting their turns loses no safety.
+**Alternatives:** regenerate with a different prompt (rejected: extra quota and PLAN says do not regenerate); suppress all repeats (rejected: breaks explicit re-requests).
+
+## 2026-11-26 — Offline eval harness over production functions
+
+**Status:** accepted
+**Decision:** `evals/guardrails/*.json` and `evals/agents/scenarios.json` feed Vitest-style runners that inject the real pure functions (`detectJailbreak`, `redactPii`, `detectRedundancy`, `evaluateOrder`, new `cart-limits.ts` helpers) and the real LangGraph with replay model steps. Cart qty/line/stock decisions were extracted from `CartService` into `cart-limits.ts` so the eval exercises production code; service behavior/messages are unchanged.
+**Why:** PLAN §10.5 wants pass-rate tables in CI with no network or keys. Testing a copy of the rules would measure nothing; injecting the shipped functions makes the gate meaningful.
+**Alternatives:** live-only evals (rejected: CI would need keys/Chroma); scenario-only agent tests with fakes for every layer (rejected: would not exercise routing/resolvers).
+
+## 2026-11-26 — Demo artifacts and Nest DI boot fix
+
+**Status:** accepted
+**Decision:** Ship `docs/demo-script.md` (14 scenarios), `scripts/demo/smoke.mjs` (dependency-free HTTP smoke with PASS/FAIL/SKIP and `--db` for PII inspection), and `compose.demo.yml` (Chroma + API + web, single instance). Chat sessions are server-created: the smoke aliases a scenario label to the `message_start` session id and omits `sessionId` on the first turn. Also converted `OrderWriteService`/`CheckoutService` imports in `order.service.ts`, `checkout.service.ts` and `cart.controller.ts` from `import type` to value imports.
+**Why:** The gate requires an end-to-end demo; running it exposed that a type-only import of an injected class makes Nest fail at boot (unit/build tests could not catch it), and that clients cannot choose a session id. SKIP is used for missing Chroma/budget/provider/abort prerequisites rather than false failures.
+**Alternatives:** markdown only (rejected: gate not verifiable); client-chosen session ids (rejected: API contract forbids unknown ids); leave DI imports (rejected: API cannot start).

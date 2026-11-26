@@ -1,0 +1,100 @@
+# Full single-instance demo stack: Chroma + API + web (PLAN §21).
+#
+# Bootstrap ONCE before `docker compose -f compose.demo.yml up`:
+#   1. cp .env.example .env  # set a real JWT_SECRET (>=32 chars) and provider keys; never commit .env
+#   2. docker compose -f compose.demo.yml run --rm api \
+#        sh -lc 'corepack enable && pnpm install --frozen-lockfile && pnpm prisma:generate && pnpm db:reset && pnpm rag:ingest'
+#      (without Docker, the same bootstrap is: pnpm install && pnpm prisma:generate &&
+#       pnpm db:reset && pnpm rag:ingest — but then run `pnpm dev` locally instead of this stack)
+#   3. docker compose -f compose.demo.yml up
+#   4. Log in at http://localhost:3000 with alice@example.com / Demo1234!
+#
+# `pnpm db:reset` and `pnpm rag:ingest` are deterministic and idempotent, so rerunning is safe.
+# Payments are mocked; do not enter real personal data.
+#
+# Chroma stays bound to 127.0.0.1 on the HOST in both this file and docker-compose.yml:
+# it is not a public service. The API still reaches it inside the compose network at
+# http://chroma:8000 (container DNS), which is why CHROMA_URL is overridden below.
+# No :latest tags; the Chroma service mirrors the pinned base compose file exactly.
+
+services:
+  chroma:
+    image: chromadb/chroma:1.5.9 # pinned; no :latest (PLAN §18)
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - chroma-data:/var/lib/chroma
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -qO- http://127.0.0.1:8000/api/v2/heartbeat >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  api:
+    image: node:24
+    working_dir: /work
+    env_file: .env
+    environment:
+      NODE_ENV: development
+      PORT: "3001"
+      # Container DNS + browser origin: the browser talks to Next, which proxies /api/* to this API.
+      CHROMA_URL: http://chroma:8000
+      WEB_ORIGIN: http://localhost:3000
+      API_ORIGIN: http://api:3001
+      DATABASE_URL: file:./data/app.db
+      CHECKPOINT_DATABASE_PATH: ./data/checkpoints.db
+    depends_on:
+      chroma:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    volumes:
+      - .:/work
+      # SQLite app.db + checkpoints.db outlive container recreation.
+      - api-data:/work/apps/api/data
+      # Keep installed dependencies container-local (pnpm links into each workspace).
+      - /work/node_modules
+      - /work/apps/api/node_modules
+      - /work/apps/web/node_modules
+      - /work/packages/shared/node_modules
+    command: >
+      sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm prisma:generate &&
+      pnpm --filter @shopping-agent/shared build &&
+      pnpm --filter @shopping-agent/api dev"
+    restart: unless-stopped
+
+  web:
+    image: node:24
+    working_dir: /work
+    env_file: .env
+    environment:
+      NODE_ENV: development
+      # Next.js rewrites /api/* server-side; the httpOnly auth cookie stays same-origin.
+      API_ORIGIN: http://api:3001
+      WEB_ORIGIN: http://localhost:3000
+      CHROMA_URL: http://chroma:8000
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/work
+      - /work/node_modules
+      - /work/apps/api/node_modules
+      - /work/apps/web/node_modules
+      - /work/packages/shared/node_modules
+      - /work/apps/web/.next
+    command: >
+      sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm prisma:generate &&
+      pnpm --filter @shopping-agent/shared build &&
+      pnpm --filter @shopping-agent/web dev --hostname 0.0.0.0"
+    restart: unless-stopped
+
+volumes:
+  chroma-data:
+  api-data:

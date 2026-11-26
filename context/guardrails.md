@@ -39,6 +39,12 @@ Values are starting points; env overrides are zod-validated at startup. Provider
 
 **Why buffering:** output PII masking and redundancy need the full response. Generate → guard → footer → persist → stream.
 
+**Implemented (Phase 7):**
+- Jailbreak: `guardrails/jailbreak.ts` deterministic rules (override, leak, roleplay, encoded, indirect, privilege, multi-turn). Tool/history text is data: it can flag a turn but cannot block a benign user alone; compliance after an injection blocks. Opt-in `guardrail` chain via `JAILBREAK_LIVE_CLASSIFIER`; failure allows read-only, blocks side effects. Both services record `jailbreak`/`jailbreak.degraded`.
+- Redundancy: `guardrails/redundancy.ts` normalized-token Jaccard ≥ `REDUNDANCY_SIMILARITY_THRESHOLD` or repeated tool calls beyond the cap; explicit repeats and receipts exempt; short-circuits before footer/persist.
+- PII: identifier protection keeps SKU/`ORD-` digit runs out of phone/card regexes (no false positives on the eval set).
+- Inspect: `pnpm guardrails:inspect [--rule --action --session --user --since --limit --json]` reads `guardrail_events` without raw text.
+
 ## Non-LLM safety rules
 
 - Identity (`userId`, `sessionId`, `turnId`, `clientMessageId`) always comes from auth context.
@@ -76,3 +82,5 @@ Datasets are JSON/JSONL; runners are Vitest suites (`pnpm eval:guardrails`), usa
 - `rag`: hit-rate@k + deterministic fact checks; out-of-scope redirect; "I don't have that information".
 - `agents`: 12–15 scenarios with expected tool calls and DB state.
 - Runner prints a pass-rate table and writes JSON for CI.
+- **Implemented:** `pnpm eval:guardrails` runs jailbreak (52 attacks / 49 benign), PII (25), redundancy (10), orders (15), cart (14) against the real pure functions; `pnpm eval:agents` runs 15 replay scenarios through the real graph. `pnpm eval:rag` stays live-only (Chroma + keys). Results in `evals/results/*.json` (gitignored).
+- **Measured 2026-11-26:** jailbreak 100% block @ 0% FPR and 0 core false blocks; PII 100% redaction @ 0% FPR; redundancy/orders/cart 100%; agents 15/15. `pnpm demo:smoke` against replay API: 10 PASS / 0 FAIL / 4 SKIP (SKIP = Chroma/budget/provider/abort prerequisites).
