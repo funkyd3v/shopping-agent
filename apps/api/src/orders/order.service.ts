@@ -52,4 +52,23 @@ export class OrderService {
     }
     return toOrderDetail(order);
   }
+
+  /**
+   * Agent tool lookup by internal id or customer-facing order number
+   * (`ORD-…`). Still scoped by user, so another user's order is a 404.
+   */
+  async getByReferenceForUser(userId: string, reference: string): Promise<OrderDetail> {
+    const ref = reference.trim();
+    const order = await this.prisma.order.findFirst({
+      where: {
+        userId,
+        OR: [{ id: ref }, { orderNumber: ref }, { orderNumber: ref.toUpperCase() }],
+      },
+      include: { items: { orderBy: { id: 'asc' } } },
+    });
+    if (!order) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Order not found.' });
+    }
+    return toOrderDetail(order);
+  }
 }

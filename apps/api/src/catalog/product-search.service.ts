@@ -1,9 +1,16 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { ProductDetail, ProductList, ProductListQuery } from '@shopping-agent/shared';
+import type { ProductDetail, ProductList, ProductListQuery, Review } from '@shopping-agent/shared';
 import { PrismaService } from '../db/prisma.service';
 import { Prisma } from '../generated/prisma/client';
 import { toProductDto, toReviewDto } from './catalog.mapper';
 import { dollarsToCents, toFtsMatch } from './product-search.util';
+
+export type ReviewSort = 'recent' | 'highest' | 'lowest';
+
+export type ProductReviews = {
+  product: { id: string; name: string };
+  reviews: Review[];
+};
 
 const PRODUCT_ORDER: Prisma.ProductOrderByWithRelationInput[] = [
   { ratingCount: 'desc' },
@@ -53,6 +60,35 @@ export class ProductSearchService {
     }
 
     return this.searchLike({ ...filters, text: query.q });
+  }
+
+  /** Bounded review read for the review agent (PLAN §8.4). */
+  async listReviews(
+    productId: string,
+    limit: number,
+    sort: ReviewSort = 'recent',
+  ): Promise<ProductReviews> {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true, name: true },
+    });
+    if (!product) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Product not found.' });
+    }
+
+    const orderBy: Prisma.ReviewOrderByWithRelationInput[] =
+      sort === 'highest'
+        ? [{ rating: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }]
+        : sort === 'lowest'
+          ? [{ rating: 'asc' }, { createdAt: 'desc' }, { id: 'asc' }]
+          : [{ createdAt: 'desc' }, { id: 'asc' }];
+
+    const reviews = await this.prisma.review.findMany({
+      where: { productId },
+      orderBy,
+      take: limit,
+    });
+    return { product, reviews: reviews.map(toReviewDto) };
   }
 
   async getById(id: string): Promise<ProductDetail> {
