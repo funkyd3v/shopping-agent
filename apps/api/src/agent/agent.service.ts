@@ -3,8 +3,16 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { ChatRequest, ErrorCode, SseUsage } from '@shopping-agent/shared';
 import { ChatSessionService, type PreparedTurn } from '../chat/chat-session.service';
 import { isTurnAborted, TurnAbortedError } from '../common/turn-abort';
+import { getEnv } from '../config/env';
 import { GuardrailService } from '../guardrails/guardrail.service';
+import {
+  GUARDRAIL_COPY,
+  JAILBREAK_POLICY,
+  REDUNDANCY_POLICY,
+} from '../guardrails/guardrails.policy';
+import { type Classifier, classifyJailbreak, hasSideEffectIntent } from '../guardrails/jailbreak';
 import { redactPii } from '../guardrails/pii';
+import { detectRedundancy } from '../guardrails/redundancy';
 import {
   BudgetExhaustedError,
   estimateTokens,
@@ -112,6 +120,45 @@ export class AgentService {
         });
       }
       const message = redaction.text;
+      const settings = guardrailEnv();
+
+      // Jailbreak middleware runs before the graph/router (PLAN §10.2 #3).
+      const history = await this.sessions.loadRecentTurns(
+        session.id,
+        userMessage.seq,
+        policy.routerHistoryTurns,
+      );
+      const jailbreak = await this.checkJailbreak(
+        message,
+        history,
+        userId,
+        session.id,
+        ctx,
+        settings,
+      );
+      if (jailbreak.blocked) {
+        await this.guardrails.record({
+          userId,
+          sessionId: session.id,
+          rule: 'jailbreak',
+          action: 'refuse',
+          score: jailbreak.score,
+          details: {
+            reasons: jailbreak.reasons.join(','),
+            category: jailbreak.category,
+            source: jailbreak.source,
+          },
+        });
+        runStatus = 'blocked';
+        errorCode = 'JAILBREAK_BLOCKED';
+        return this.finish(turn, GUARDRAIL_COPY.jailbreakBlocked, 'ok', usage, {
+          route,
+          model,
+          provider,
+          promptVersion,
+          toolCalls,
+        });
+      }
 
       try {
         await this.budgets.assertAvailable({
@@ -140,12 +187,6 @@ export class AgentService {
         }
         throw error;
       }
-
-      const history = await this.sessions.loadRecentTurns(
-        session.id,
-        userMessage.seq,
-        policy.routerHistoryTurns,
-      );
 
       let lastModel = '';
       let lastProvider = '';
@@ -246,6 +287,34 @@ export class AgentService {
         });
       }
 
+      const redundant = detectRedundancy({
+        reply: answer,
+        assistantHistory: history
+          .filter((entry) => entry.role === 'assistant')
+          .map((entry) => entry.content),
+        toolCalls,
+        userMessage: message,
+        threshold: settings.similarity,
+      });
+      if (redundant.redundant) {
+        await this.guardrails.record({
+          userId,
+          sessionId: session.id,
+          rule: redundant.rule,
+          action: 'refuse',
+          score: redundant.score,
+          details: { reason: redundant.reason },
+        });
+        runStatus = 'blocked';
+        return this.finish(turn, GUARDRAIL_COPY.redundancy, 'ok', usage, {
+          route,
+          model,
+          provider,
+          promptVersion,
+          toolCalls,
+        });
+      }
+
       const text = `${answer}${buildAgentFooter(
         output.productFooter,
         output.orderFooter,
@@ -304,6 +373,48 @@ export class AgentService {
         ...(errorCode ? { errorCode } : {}),
       });
     }
+  }
+
+  /** Heuristic always runs; the optional model classifier only sees gray-zone text. */
+  private async checkJailbreak(
+    message: string,
+    history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    userId: string,
+    sessionId: string,
+    ctx: AgentRunContext,
+    settings: GuardrailSettings,
+  ): Promise<Awaited<ReturnType<typeof classifyJailbreak>>> {
+    let classify: Classifier | undefined;
+    if (settings.live) {
+      classify = async (messages) => {
+        const served = await this.gateway.generate({
+          chain: 'guardrail',
+          messages,
+          temperature: 0,
+          signal: ctx.signal,
+        });
+        return served.content;
+      };
+    }
+    const verdict = await classifyJailbreak({
+      message,
+      history,
+      toolOutputs: [],
+      sideEffects: hasSideEffectIntent(message),
+      threshold: settings.threshold,
+      classify,
+    });
+    if (verdict.source === 'degraded') {
+      await this.guardrails.record({
+        userId,
+        sessionId,
+        rule: verdict.blocked ? 'jailbreak' : 'jailbreak.degraded',
+        action: verdict.blocked ? 'refuse' : 'degrade',
+        score: verdict.score,
+        details: { reasons: verdict.reasons.join(','), source: 'degraded' },
+      });
+    }
+    return verdict;
   }
 
   private async callModel(input: {
@@ -435,5 +546,36 @@ export class AgentService {
       sources: [],
     });
     return { text, status, usage, ...meta };
+  }
+}
+
+type GuardrailSettings = {
+  threshold: number;
+  similarity: number;
+  live: boolean;
+};
+
+/** Env overrides are validated at startup; tests may not boot ConfigModule. */
+function guardrailEnv(): GuardrailSettings {
+  try {
+    const env = getEnv();
+    return {
+      threshold: env.JAILBREAK_THRESHOLD,
+      similarity: env.REDUNDANCY_SIMILARITY_THRESHOLD,
+      live: env.JAILBREAK_LIVE_CLASSIFIER,
+    };
+  } catch {
+    const numberOr = (value: string | undefined, fallback: number): number => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+    return {
+      threshold: numberOr(process.env.JAILBREAK_THRESHOLD, JAILBREAK_POLICY.threshold),
+      similarity: numberOr(
+        process.env.REDUNDANCY_SIMILARITY_THRESHOLD,
+        REDUNDANCY_POLICY.similarityThreshold,
+      ),
+      live: process.env.JAILBREAK_LIVE_CLASSIFIER === 'true',
+    };
   }
 }

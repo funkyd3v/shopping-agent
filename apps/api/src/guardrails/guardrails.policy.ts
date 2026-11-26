@@ -50,6 +50,49 @@ export const RAG_COPY = {
 
 export const RAG_PROMPT_VERSION = 'rag-policy-v1';
 
+/**
+ * Jailbreak defense (PLAN §10.2). A deterministic pre-filter runs on every
+ * turn; the small-model `guardrail` classifier is opt-in (`--live` eval / env)
+ * and only runs for text the pre-filter could not decide. Fail modes follow
+ * the policy: a classifier outage allows read-only chat but blocks mutations.
+ */
+export const JAILBREAK_POLICY = {
+  action: 'block',
+  /** Heuristic/model score at or above this value blocks the turn. */
+  threshold: 0.8,
+  /** Score used to mark text as suspicious for the optional model classifier. */
+  grayZone: 0.35,
+  /** Scan tool-derived text as well as the user message. */
+  scanToolOutputs: true,
+  /** Redacted history turns fed to the classifier / multi-turn accumulator. */
+  includeHistoryTurns: 4,
+  failMode: { readOnly: 'allow', sideEffects: 'block' },
+  /** Score assigned when the current turn complies with an earlier injection. */
+  complianceBoost: 0.9,
+} as const;
+
+/** Near-duplicate/short-circuit rules (PLAN §10.2, §10.5). */
+export const REDUNDANCY_POLICY = {
+  /** Repeated identical tool calls beyond this count are a loop. */
+  maxRepeatedToolCalls: 2,
+  /** Normalized-token Jaccard at or above this value is a duplicate reply. */
+  similarityThreshold: 0.9,
+  /** Ignore short acknowledgements; only compare substantive replies. */
+  minReplyChars: 80,
+  action: 'short_circuit',
+  /** These must never be suppressed. */
+  exempt: ['explicit-repeat', 'order-receipt', 'cart-receipt'],
+  /** Assistant turns compared with the current reply. */
+  historyTurns: 4,
+} as const;
+
+export const GUARDRAIL_COPY = {
+  jailbreakBlocked:
+    "I can't help with that request. I can help you find products, manage your cart, place orders, and answer store-policy questions.",
+  redundancy:
+    'I already answered that. Ask for something new, or say "again" if you want me to repeat it.',
+} as const;
+
 /** Prompt for the optional ambiguity classifier (JSON output). */
 export const SCOPE_CLASSIFIER_SYSTEM_PROMPT = `You classify questions for a store-policy help desk.
 Allowed topics: shipping, delivery, returns, refunds, warranty, payment methods, privacy, order cancellation policy, and store FAQ.

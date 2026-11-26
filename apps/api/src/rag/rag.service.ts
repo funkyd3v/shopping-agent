@@ -1,9 +1,18 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { ChatRequest, ChatSource, ErrorCode, SseUsage } from '@shopping-agent/shared';
 import { ChatSessionService, type PreparedTurn } from '../chat/chat-session.service';
+import { getEnv } from '../config/env';
 import { GuardrailService } from '../guardrails/guardrail.service';
-import { RAG_COPY, RAG_POLICY } from '../guardrails/guardrails.policy';
+import {
+  GUARDRAIL_COPY,
+  JAILBREAK_POLICY,
+  RAG_COPY,
+  RAG_POLICY,
+  REDUNDANCY_POLICY,
+} from '../guardrails/guardrails.policy';
+import { detectJailbreak } from '../guardrails/jailbreak';
 import { redactPii } from '../guardrails/pii';
+import { detectRedundancy } from '../guardrails/redundancy';
 import {
   BudgetExhaustedError,
   estimateTokens,
@@ -108,6 +117,30 @@ export class RagService {
       });
     }
     const question = redaction.text;
+    const guardrails = ragGuardrailEnv();
+    const history = await this.sessions.loadRecentTurns(
+      session.id,
+      userMessage.seq,
+      settings.historyTurns,
+    );
+
+    // Read-only chat: the heuristic is the only jailbreak layer (PLAN §10.4).
+    const jailbreak = detectJailbreak({
+      message: question,
+      history,
+      threshold: guardrails.threshold,
+    });
+    if (jailbreak.blocked) {
+      await this.guardrails.record({
+        userId,
+        sessionId: session.id,
+        rule: 'jailbreak',
+        action: 'refuse',
+        score: jailbreak.score,
+        details: { reasons: jailbreak.reasons.join(','), source: 'heuristic' },
+      });
+      return this.finish(turn, GUARDRAIL_COPY.jailbreakBlocked, 'ok', [], usage);
+    }
 
     try {
       await this.budgets.assertAvailable({
@@ -129,11 +162,6 @@ export class RagService {
       throw error;
     }
 
-    const history = await this.sessions.loadRecentTurns(
-      session.id,
-      userMessage.seq,
-      settings.historyTurns,
-    );
     // A context-dependent follow-up inside an existing policy chat is in scope
     // even if condensation fails (provider hiccup); retrieval + maxDistance still
     // guard against answering unrelated questions.
@@ -284,6 +312,26 @@ export class RagService {
       return this.providerFailure(turn, usage);
     }
 
+    const redundant = detectRedundancy({
+      reply: answer,
+      assistantHistory: history
+        .filter((entry) => entry.role === 'assistant')
+        .map((entry) => entry.content),
+      userMessage: question,
+      threshold: guardrails.similarity,
+    });
+    if (redundant.redundant) {
+      await this.guardrails.record({
+        userId,
+        sessionId: session.id,
+        rule: redundant.rule,
+        action: 'refuse',
+        score: redundant.score,
+        details: { reason: redundant.reason },
+      });
+      return this.finish(turn, GUARDRAIL_COPY.redundancy, 'ok', [], usage);
+    }
+
     const sources = sourcesFromChunks(relevant, settings.maxSources);
     // If the grounded model itself refuses, do not attach unrelated sources.
     if (answer.trim() === RAG_COPY.noMatch) {
@@ -413,4 +461,26 @@ export class RagService {
 
 function isAbort(error: unknown): boolean {
   return error instanceof TurnAbortedError;
+}
+
+function ragGuardrailEnv(): { threshold: number; similarity: number } {
+  try {
+    const env = getEnv();
+    return {
+      threshold: env.JAILBREAK_THRESHOLD,
+      similarity: env.REDUNDANCY_SIMILARITY_THRESHOLD,
+    };
+  } catch {
+    const numberOr = (value: string | undefined, fallback: number): number => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+    return {
+      threshold: numberOr(process.env.JAILBREAK_THRESHOLD, JAILBREAK_POLICY.threshold),
+      similarity: numberOr(
+        process.env.REDUNDANCY_SIMILARITY_THRESHOLD,
+        REDUNDANCY_POLICY.similarityThreshold,
+      ),
+    };
+  }
 }

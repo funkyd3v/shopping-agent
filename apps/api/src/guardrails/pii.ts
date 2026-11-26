@@ -35,8 +35,29 @@ const PLACEHOLDERS: Record<PiiKind, string> = {
   card: '[REDACTED_CARD]',
 };
 
+/** SKUs and order numbers can contain 10+ digits; never treat them as phones. */
+const IDENTIFIER = /\b(?:SKU|ORD|ORDER|ID|SN|SERIAL|NO)[-\s]?[A-Z0-9-]{4,}\b/gi;
+
+function protectIdentifiers(input: string): { text: string; restore: (value: string) => string } {
+  const saved: string[] = [];
+  const text = input.replace(IDENTIFIER, (match) => {
+    const token = `@@ID${saved.length}@@`;
+    saved.push(match);
+    return token;
+  });
+  return {
+    text,
+    restore: (value: string) =>
+      saved.reduce(
+        (result, identifier, index) => result.replaceAll(`@@ID${index}@@`, identifier),
+        value,
+      ),
+  };
+}
+
 export function redactPii(input: string): PiiRedaction {
-  let text = input;
+  const identifiers = protectIdentifiers(input);
+  let text = identifiers.text;
   const findings: PiiFinding[] = [];
 
   const cards = { count: 0, allValid: true };
@@ -65,7 +86,7 @@ export function redactPii(input: string): PiiRedaction {
   }
   if (phones.count > 0) findings.push({ kind: 'phone', count: phones.count });
 
-  return { text, findings };
+  return { text: identifiers.restore(text), findings };
 }
 
 export function containsPii(input: string): boolean {

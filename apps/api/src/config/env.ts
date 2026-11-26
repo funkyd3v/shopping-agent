@@ -99,6 +99,12 @@ export const envSchema = z.object({
   SESSION_TOKEN_BUDGET: int(150_000, 1),
   DAILY_TOKEN_BUDGET: int(500_000, 1),
 
+  // Guardrail thresholds (PLAN §10; overrides for guardrails.policy.ts)
+  JAILBREAK_THRESHOLD: float(0.8, 0, 1),
+  REDUNDANCY_SIMILARITY_THRESHOLD: float(0.9, 0, 1),
+  /** Opt-in small-model jailbreak classifier; heuristic runs regardless. */
+  JAILBREAK_LIVE_CLASSIFIER: boolish(false),
+
   // Streaming/input
   STREAM_MODE: z.enum(['buffered', 'holdback']).default('buffered'),
   MAX_MESSAGE_CHARS: int(2000, 1),
