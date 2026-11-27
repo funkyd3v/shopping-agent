@@ -16,6 +16,8 @@ import { SignInPanel } from './products-browser';
 
 export type ChatPanelConfig = {
   kind: ChatSessionKind;
+  /** Pin the composer below a scrollable transcript (used by `/help`). */
+  fixedComposer?: boolean;
   sessionStorageKey: string;
   assistantLabel: string;
   inputLabel: string;
@@ -38,7 +40,7 @@ function toEntry(message: ChatMessage): ChatEntry {
  * chrome, trace panels, or meters.
  */
 export function ChatPanel({ config }: { config: ChatPanelConfig }) {
-  const { kind, sessionStorageKey, assistantLabel, errorFallback } = config;
+  const { kind, sessionStorageKey, assistantLabel, errorFallback, fixedComposer } = config;
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [sessionId, setSessionId] = useState<string>();
   const [input, setInput] = useState('');
@@ -258,46 +260,49 @@ export function ChatPanel({ config }: { config: ChatPanelConfig }) {
     return <SignInPanel message={config.authMessage} />;
   }
 
-  return (
-    <div className="space-y-8">
-      {messages.length === 0 ? (
-        <section className="rounded-xl border border-dashed border-border p-6">
-          <h2 className="font-display text-lg font-semibold tracking-tight">{config.emptyTitle}</h2>
-          <div className="mt-1 text-sm leading-relaxed text-muted-foreground">
-            {config.emptyDescription}
-          </div>
-          <ul className="mt-4 flex flex-col items-start gap-1">
-            {config.examples.map((example) => (
-              <li key={example}>
-                <button
-                  type="button"
-                  onClick={() => applyExample(example)}
-                  className="text-left text-sm text-accent underline underline-offset-4 hover:text-accent/80"
-                >
-                  {example}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : (
-        <section aria-label="Conversation" className="space-y-6">
-          {messages.map((message) => (
-            <div
-              key={message.key}
-              className="border-t border-border pt-6 first:border-t-0 first:pt-0"
-            >
-              <ChatMessageView message={message} assistantLabel={assistantLabel} />
-            </div>
+  const conversation =
+    messages.length === 0 ? (
+      <section className="rounded-xl border border-dashed border-border p-6">
+        <h2 className="font-display text-lg font-semibold tracking-tight">{config.emptyTitle}</h2>
+        <div className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          {config.emptyDescription}
+        </div>
+        <ul className="mt-4 flex flex-col items-start gap-1">
+          {config.examples.map((example) => (
+            <li key={example}>
+              <button
+                type="button"
+                onClick={() => applyExample(example)}
+                className="text-left text-sm text-accent underline underline-offset-4 hover:text-accent/80"
+              >
+                {example}
+              </button>
+            </li>
           ))}
-          <div ref={endRef} />
-        </section>
-      )}
+        </ul>
+      </section>
+    ) : (
+      <section aria-label="Conversation" className="space-y-6">
+        {messages.map((message) => (
+          <div
+            key={message.key}
+            className="border-t border-border pt-6 first:border-t-0 first:pt-0"
+          >
+            <ChatMessageView message={message} assistantLabel={assistantLabel} />
+          </div>
+        ))}
+        <div ref={endRef} />
+      </section>
+    );
 
-      <p className="sr-only" role="status">
-        {busy ? (phase === 'generating' ? 'Writing an answer.' : 'Thinking.') : ''}
-      </p>
+  const status = (
+    <p className="sr-only" role="status">
+      {busy ? (phase === 'generating' ? 'Writing an answer.' : 'Thinking.') : ''}
+    </p>
+  );
 
+  const composer = (
+    <>
       {error ? (
         <p
           role="alert"
@@ -363,6 +368,26 @@ export function ChatPanel({ config }: { config: ChatPanelConfig }) {
           </div>
         </div>
       </form>
+    </>
+  );
+
+  if (fixedComposer) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <div className="min-h-[20rem] flex-1 overflow-y-auto overscroll-contain pb-4 pr-2">
+          {conversation}
+        </div>
+        {status}
+        <div className="shrink-0 border-t border-border/80 pt-4">{composer}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      {conversation}
+      {status}
+      {composer}
     </div>
   );
 }

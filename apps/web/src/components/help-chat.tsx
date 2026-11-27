@@ -5,6 +5,7 @@ import { ChatPanel, type ChatPanelConfig } from './chat-panel';
 
 const CONFIG: ChatPanelConfig = {
   kind: 'rag',
+  fixedComposer: true,
   sessionStorageKey: 'shopping-agent:help-session',
   assistantLabel: 'Store help',
   inputLabel: 'Your question',
