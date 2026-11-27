@@ -1,13 +1,13 @@
 # Shopping Agent
 
-A demo store with an AI assistant that can actually shop for you. The assistant
-uses different models for different jobs, with automatic fallback between Groq
-and Gemini. Ask it to find products, summarize reviews, add items to your cart,
-place an order, check out, cancel an order, or answer questions about shipping
-and returns. The assistant works on the same data you see on the store pages.
+A demo store with two AI chats. **/assistant** is a multi-model, multi-agent
+assistant that can actually shop for you: it finds products, summarizes reviews,
+manages the cart, and places or cancels orders. It uses different models for
+different jobs, with automatic fallback between Groq and Gemini. **/help** is a
+RAG-based chat: it looks up store-policy documents before answering and shows
+the sources it used. Both chats work on the same data you see on the store pages.
 
-An AI agent connected to real application code, with limits and safety checks
-enforced in code rather than only in prompts.
+Limits and safety checks are enforced in code rather than only in prompts.
 
 > **Under active development.** This is an MVP demo, not a production store.
 > Payments are simulated, all products and reviews are generated demo data, and
@@ -16,10 +16,12 @@ enforced in code rather than only in prompts.
 
 ## What you can try
 
-- **Assistant chat:** “find wireless headphones under $80”, “add 2 of the second
-  one to my cart”, “checkout my cart”, “cancel my last order”.
-- **Help chat:** shipping, returns, warranty, payment and privacy questions,
-  with the source documents listed under each answer.
+- **Assistant chat (`/assistant`):** the multi-model, multi-agent chat — “find
+  wireless headphones under $80”, “add 2 of the second one to my cart”,
+  “checkout my cart”, “cancel my last order”.
+- **Help chat (`/help`):** the RAG-based chat — shipping, returns, warranty,
+  payment and privacy questions, answered from store-policy documents with
+  the sources listed under each answer.
 - **Store pages:** browse products, manage the cart, and view orders — the same
   records the assistant reads and writes.
 
