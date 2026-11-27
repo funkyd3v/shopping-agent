@@ -16,7 +16,7 @@
 ## Now
 
 - **Phase:** 7 — Guardrails, evals, polish ✅ (closed 2026-11-26; `pnpm run ci` green)
-- **Next action:** P0 security follow-up done (rate limits, helmet, gateway hardening, guardrail order). Awaiting decision on the §8.8 vs jailbreak conflict; then P1 E2E/CI gaps remain.
+- **Next action:** P0 done and §8.8 conflict resolved (block kept). P1 E2E/CI gaps remain; no Phase 8 exists in PLAN v5.
 - **Blockers:** none. Chroma is only needed for live `/help` or `pnpm eval:rag`; the verified index has 52 chunks.
 - **Open decisions:** none blocking. Free-tier TPM/RPD still unmeasured (see blockers below).
 
@@ -101,7 +101,7 @@
 | 2026-11-26 | 6 | Order write path: limits, mutex, idempotency, checkout/cancel REST (committed as `bd28145`) | `apps/api/src/orders/**`, `apps/api/src/common/write-mutex.ts`, `packages/shared/src/{dto,orders}.ts` | Order agent |
 | 2026-11-26 | 6 | Order agent (resolver, 4 tools, receipt footers, graph node), web checkout/cancel/badges; CI green; Phase 6 closed | `apps/api/src/agent/agent.order.*`, `agent.{tools,graph,footer,policy,prompts,types}.ts`, `apps/web/src/{lib/api.ts,components/**}` | Phase 7 |
 | 2026-11-26 | 7 | Jailbreak/redundancy guardrails, offline eval datasets + runners, guardrail inspect, demo script/smoke, README/compose, DI boot fix; Phase 7 closed | `apps/api/src/{guardrails,evals,cart}/**`, `apps/api/scripts/**`, `evals/**`, `docs/demo-script.md`, `scripts/demo/**`, `compose.demo.yml` | nightly live evals |
-| 2026-11-27 | 7+ | P0 follow-up: rate-limit guard + helmet, gateway retry/quota/usage/record/JSON capability/run deadline, guardrail ordering/fail-mode/tool scan/DB busy retry; 354 API tests | `apps/api/src/{common,guardrails,model-gateway,orders,agent,rag}/**`, `packages/shared/src/errors.ts`, `context/*`, `docs/decisions.md` | §8.8 decision, then P1 E2E |
+| 2026-11-27 | 7+ | P0 follow-up: rate-limit guard + helmet, gateway retry/quota/usage/record/JSON capability/run deadline, guardrail ordering/fail-mode/tool scan/DB busy retry; §8.8 block kept; 354 API tests | `apps/api/src/{common,guardrails,model-gateway,orders,agent,rag}/**`, `PLAN.md`, `context/*`, `docs/decisions.md` | P1 E2E |
 
 ## Blockers and open questions
 

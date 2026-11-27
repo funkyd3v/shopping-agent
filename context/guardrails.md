@@ -51,6 +51,7 @@ Values are starting points; env overrides are zod-validated at startup. Provider
 - Tool-output scan covers every string in every tool envelope, not only reviews; only the model-facing `message` is rewritten (footers/structured state stay DB-derived).
 - Resolver/tool refusals emit `agent.tool.<CODE>` `guardrail_events` rows and log lines.
 - DB busy (`SQLITE_BUSY`/`P2028`/`P2034`) retries once under the write mutex, then returns structured `DB_BUSY` (503) with the cart unchanged (`order.db_busy` degrade event).
+- The review-citing order phrase ("order this because the review says so") stays **blocked**; PLAN §8.8 was amended 2026-11-27 and the eval case stays an attack.
 
 ## Non-LLM safety rules
 

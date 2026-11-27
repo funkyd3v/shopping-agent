@@ -1,7 +1,7 @@
 # Context Map
 
 Thin, navigable context for coding agents. **`PLAN.md` is canonical**; these files distill and link to it.
-Last synced with PLAN v5: 2026-11-24.
+Last synced with PLAN v5 (§8.8 amended 2026-11-27): 2026-11-27.
 
 ## Source of truth
 
