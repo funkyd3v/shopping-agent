@@ -698,7 +698,7 @@ GET  /usage/me                                        # budgets and today's usag
 GET  /users/me                                        PATCH /users/me/address
 ```
 
-- All routes except `/auth/*` require JWT.
+- All routes except `/auth/*` require JWT. **Exception (2026-11-27):** the policy-help endpoints `POST /rag/chat`, `GET /sessions?kind=rag`, and `GET /sessions/:id/messages` are anonymous-capable — a signed httpOnly guest cookie maps each browser to its own User row, so transcripts stay isolated and guardrail/usage rows keep their FKs. A signed-in request keeps its authenticated identity. `/agent/chat`, cart, orders and all other routes still require JWT.
 - `clientMessageId` is required for both chat endpoints; `clientRequestId` is required for `/cart/checkout`.
 - **Ownership checks on every resource read/write** (`/cart`, `/orders/:id`, `/sessions/:id/messages`): another user's resource returns 404.
 - A session's `kind` must match the endpoint (`rag` vs `agent`).

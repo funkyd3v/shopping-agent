@@ -38,6 +38,7 @@ Conventions used below:
   the stream ends with `data: {"type":"done","status":"ok"|"error"}`. Guardrail
   refusals are **ordinary assistant text in a 200 stream**, not HTTP errors.
 - To create a fresh demo state: `pnpm demo:reset` (`db:reset` + `rag:ingest`).
+- **`/help` works without signing in.** The API issues a signed httpOnly `guest_session` cookie on the first anonymous request, so guests get their own isolated transcript. The login cookie above is still required for `/assistant`, products-with-cart actions, `/cart` and `/orders`.
 
 Inspect helpers (no extra dependencies beyond `sqlite3`, optional):
 
