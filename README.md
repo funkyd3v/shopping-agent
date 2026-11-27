@@ -1,9 +1,10 @@
 # Shopping Agent
 
-A demo store with an AI assistant that can actually shop for you. Ask it to find
-products, summarize reviews, add items to your cart, place an order, check out,
-cancel an order, or answer questions about shipping and returns. The assistant
-works on the same data you see on the store pages.
+A demo store with an AI assistant that can actually shop for you. The assistant
+uses different models for different jobs, with automatic fallback between Groq
+and Gemini. Ask it to find products, summarize reviews, add items to your cart,
+place an order, check out, cancel an order, or answer questions about shipping
+and returns. The assistant works on the same data you see on the store pages.
 
 An AI agent connected to real application code, with limits and safety checks
 enforced in code rather than only in prompts.
@@ -12,11 +13,6 @@ enforced in code rather than only in prompts.
 > Payments are simulated, all products and reviews are generated demo data, and
 > some planned work (browser end-to-end tests, extra operational tooling) is
 > still in progress. Please do not enter real personal information.
-
-## Highlights
-
-- **Multi-model AI agent:** work is routed across several AI models, with
-  automatic fallback to another provider when one is unavailable.
 
 ## What you can try
 
