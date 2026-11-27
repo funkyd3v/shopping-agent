@@ -516,7 +516,9 @@ async function main(): Promise<void> {
         const passwordHash = await argon2.hash(DEMO_PASSWORD, { type: argon2.argon2id });
         user = await prisma.user.create({
           data: {
-            id: ulid(),
+            // Stable IDs keep JWTs minted before `pnpm demo:reset` valid after
+            // the reseed; a random ULID here orphans the browser's cookie.
+            id: stableId('user', demo.email),
             email: demo.email,
             name: demo.name,
             passwordHash,

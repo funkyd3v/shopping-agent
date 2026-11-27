@@ -3,6 +3,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
+import { PrismaService } from '../../db/prisma.service.js';
 import { setContextUserId } from '../context/request-context.js';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 
@@ -21,6 +22,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly jwt: JwtService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -39,17 +41,27 @@ export class JwtAuthGuard implements CanActivate {
       return this.allowOrThrow(isPublic);
     }
 
+    let userId: string | undefined;
     try {
       const payload = await this.jwt.verifyAsync<{ sub: string }>(token);
-      if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
-        return this.allowOrThrow(isPublic);
-      }
-      req.user = { userId: payload.sub };
-      setContextUserId(payload.sub);
-      return true;
+      if (typeof payload.sub === 'string' && payload.sub.length > 0) userId = payload.sub;
     } catch {
-      return this.allowOrThrow(isPublic);
+      // Invalid or expired token: handled by allowOrThrow below.
     }
+    if (!userId) return this.allowOrThrow(isPublic);
+
+    // A valid token can outlive its user (e.g. `pnpm demo:reset` reseeds with
+    // new IDs). Reject it as unauthenticated instead of letting downstream
+    // writes hit a FK violation and surface as a generic 500 (PLAN §13).
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) return this.allowOrThrow(isPublic);
+
+    req.user = { userId };
+    setContextUserId(userId);
+    return true;
   }
 
   private allowOrThrow(isPublic: boolean): boolean {
