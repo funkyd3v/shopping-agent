@@ -48,20 +48,6 @@ export function ChatMessageView({
               )
             : message.content}
       </p>
-      {message.sources &&
-      message.sources.length > 0 &&
-      !message.content.includes('\nSources:\n') ? (
-        <div className="text-xs leading-relaxed text-muted-foreground">
-          <p className="font-medium">Sources</p>
-          <ul className="mt-1 space-y-0.5">
-            {message.sources.map((source) => (
-              <li key={`${source.source}:${source.section}`}>
-                {source.title} — {source.section}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
     </article>
   );
 }

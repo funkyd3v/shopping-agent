@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   ANSWER_SYSTEM_PROMPT,
   buildAnswerMessages,
-  buildSourcesFooter,
   sanitizeAnswer,
   sourcesFromChunks,
 } from './prompt';
@@ -66,12 +65,6 @@ describe('sources', () => {
       { source: 'shipping.md', title: 'Shipping Policy', section: 'Shipping methods and rates' },
       { source: 'shipping.md', title: 'Shipping Policy', section: 'Processing time' },
     ]);
-  });
-
-  it('renders a plain-text footer or nothing when there are no chunks', () => {
-    expect(buildSourcesFooter([])).toBe('');
-    const footer = buildSourcesFooter([chunk()]);
-    expect(footer).toBe('\n\nSources:\n- Shipping Policy — Shipping methods and rates');
   });
 });
 

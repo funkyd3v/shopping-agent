@@ -49,8 +49,7 @@ const CONFIG: ChatPanelConfig = {
 
 /**
  * `/help` policy chat (PLAN §12.2). One plain transcript, a text input, and a
- * Stop button while a buffered answer is generating. No agent-specific UI:
- * sources are plain text under the answer.
+ * Stop button while a buffered answer is generating. No agent-specific UI.
  */
 export function HelpChat() {
   return <ChatPanel config={CONFIG} />;

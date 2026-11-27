@@ -162,7 +162,7 @@ function ruleNames(records: unknown[]): string[] {
 }
 
 describe('RagService.run', () => {
-  it('answers from retrieved context, appends sources, and persists before returning', async () => {
+  it('answers from retrieved context without a Sources section and persists before returning', async () => {
     const { service, sessions, embedded, progress } = contextFor();
     const turn = preparedTurn();
 
@@ -173,7 +173,7 @@ describe('RagService.run', () => {
 
     expect(result.status).toBe('ok');
     expect(result.text).toContain('Standard shipping is $5.95');
-    expect(result.text).toContain('Sources:\n- Shipping Policy — Shipping methods and rates');
+    expect(result.text).not.toContain('Sources:');
     expect(result.sources).toEqual([
       { source: 'shipping.md', title: 'Shipping Policy', section: 'Shipping methods and rates' },
     ]);

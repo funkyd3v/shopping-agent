@@ -22,12 +22,7 @@ import type { ChatMessage } from '../model-gateway/model-gateway.service';
 import { GatewayError, ModelGatewayService } from '../model-gateway/model-gateway.service';
 import { EMBEDDING } from '../model-gateway/models.config';
 import { condenseQuestion, needsCondense } from './condense';
-import {
-  buildAnswerMessages,
-  buildSourcesFooter,
-  sanitizeAnswer,
-  sourcesFromChunks,
-} from './prompt';
+import { buildAnswerMessages, sanitizeAnswer, sourcesFromChunks } from './prompt';
 import {
   type PolicyRetriever,
   type QueryEmbedder,
@@ -334,12 +329,14 @@ export class RagService {
       return this.providerFailure(turn, usage);
     }
 
+    // Sources stay in the stored metadata for audit/evals but are no longer
+    // appended to the answer the customer sees (PLAN §7).
     const sources = sourcesFromChunks(relevant, settings.maxSources);
     // If the grounded model itself refuses, do not attach unrelated sources.
     if (answer.trim() === RAG_COPY.noMatch) {
       return this.finish(turn, RAG_COPY.noMatch, 'ok', [], usage);
     }
-    const text = `${answer}${buildSourcesFooter(relevant, settings.maxSources)}`;
+    const text = answer;
     await this.sessions.persistAssistant({
       sessionId: session.id,
       turnId: turn.turnId,

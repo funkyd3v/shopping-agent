@@ -13,7 +13,7 @@ Rules:
 - Quote exact numbers, deadlines, and amounts from the context. Do not invent or round them.
 - Keep the answer under 180 words, in plain text with short paragraphs or bullet lists.
 - Use plain text only: no markdown emphasis, headings, tables, or code fences.
-- Do not add a "Sources" section; the server appends it.
+- Do not add a "Sources" section or cite document names; answer only with the policy facts.
 - Do not output HTML, scripts, or links other than known store routes (/products/:id, /cart, /orders/:id).`;
 
 /** Assemble the grounded answer prompt with a bounded context block. */
@@ -43,7 +43,7 @@ export function buildAnswerMessages(
   ];
 }
 
-/** Deduplicated sources in retrieval order, capped for the footer/metadata. */
+/** Deduplicated sources in retrieval order, capped for stored metadata. */
 export function sourcesFromChunks(
   chunks: RetrievedChunk[],
   maxSources: number = RAG_POLICY.maxSources,
@@ -62,19 +62,6 @@ export function sourcesFromChunks(
     if (sources.length >= maxSources) break;
   }
   return sources;
-}
-
-/** Server-generated, trusted footer added after output guardrails. */
-export function buildSourcesFooter(
-  chunks: RetrievedChunk[],
-  maxSources: number = RAG_POLICY.maxSources,
-): string {
-  const sources = sourcesFromChunks(chunks, maxSources);
-  if (sources.length === 0) return '';
-  const lines = sources.map(
-    (source) => `- ${sanitizeLabel(source.title)} — ${sanitizeLabel(source.section)}`,
-  );
-  return `\n\nSources:\n${lines.join('\n')}`;
 }
 
 /**
