@@ -16,7 +16,7 @@ import { SignInPanel } from './products-browser';
 
 export type ChatPanelConfig = {
   kind: ChatSessionKind;
-  /** Pin the composer below a scrollable transcript (used by `/help`). */
+  /** Pin the composer below a scrollable transcript (`/help`, `/assistant`). */
   fixedComposer?: boolean;
   sessionStorageKey: string;
   assistantLabel: string;
