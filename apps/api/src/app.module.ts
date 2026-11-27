@@ -9,6 +9,7 @@ import { CatalogModule } from './catalog/catalog.module';
 import { ChatModule } from './chat/chat.module';
 import { requestContextMiddleware } from './common/context/request-context';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import { originCheckMiddleware } from './common/middleware/origin-check.middleware';
 import { getEnv, validateEnv } from './config/env';
 import { PrismaModule } from './db/prisma.module';
@@ -48,8 +49,10 @@ import { UsersModule } from './users/users.module';
   controllers: [HealthController],
   providers: [
     ChromaHealthService,
-    // Global guard: everything is authenticated unless marked @Public().
+    // Global guards run in registration order: authenticate first, then limit
+    // by user (or IP for public routes). Both are global (PLAN §13/§21.4).
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RateLimitGuard },
   ],
 })
 export class AppModule implements NestModule {
