@@ -27,12 +27,12 @@ Returns LangChain chat models by role, each with a capability-checked fallback c
 
 **Ingest** (`pnpm rag:ingest`, idempotent): load `content/policies/*.md` → split by headings + recursive splitter (~500–800 tokens, ~80 overlap) → metadata (`source`, `title`, `section`, `chunk_index`, `content_hash`, `embedding_model`, `embedding_dim`, `chunker_version`) → delete changed sources, skip unchanged hashes → embed with the fixed model → upsert to Chroma `store_policies` (`hnsw:space=cosine`). Assert collection metadata at startup; fail with a re-index message.
 
-**Query:** input guardrails → condense follow-up → retrieve top-k 4–6 → cosine distance threshold → no match: "I don't have that information" (never answer from memory) → grounded `rag` answer → append deduplicated `Sources:` → Chroma down: friendly "knowledge base unavailable". Scope guard: non-policy questions → `/assistant`.
+**Query:** input guardrails → condense follow-up → retrieve top-k 4–6 → cosine distance threshold → no match: "I don't have that information" (never answer from memory) → grounded `rag` answer (no `Sources:` section; sources only in stored metadata) → Chroma down: friendly "knowledge base unavailable". Scope guard: non-policy questions → `/assistant`.
 
 **Implemented (Phase 3):**
 - Retrieval: `RAG_TOP_K=5`, `RAG_MAX_DISTANCE=0.38` (cosine **distance**; in-scope 0.185–0.333, unrelated 0.410).
 - Condense only follow-up-shaped messages; a policy follow-up with history bypasses the standalone scope classifier (read-only, fail-open).
-- Buffered SSE: generate → output sanitize/PII mask → `Sources:` → persist → token frames → `done`. Replay `(sessionId, clientMessageId)`; per-session lock; 409 on a concurrent turn.
+- Buffered SSE: generate → output sanitize/PII mask → persist → token frames → `done` (no visible sources). Replay `(sessionId, clientMessageId)`; per-session lock; 409 on a concurrent turn.
 - Degrade copy for Chroma/embedding/provider failure; every guardrail action writes `guardrail_events`.
 - Eval: `pnpm eval:rag [--retrieval-only] [--json]` → 10 policy questions + out-of-scope + no-match; retrieval hit-rate@k and deterministic facts (Unicode-normalized).
 

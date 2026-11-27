@@ -64,8 +64,9 @@ curl -N -sS -b "$JAR" -H 'Content-Type: application/json' \
   "$BASE/rag/chat"
 ```
 
-**Expected:** plain-text answer grounded in policy docs with a `Sources:` list (e.g. the returns
-doc) and `done.status=ok`. Out-of-scope or no-match questions get the `I can only answer…` /
+**Expected:** plain-text answer grounded in policy docs (no visible `Sources:` list) and
+`done.status=ok`. The retrieved sections are still stored in the assistant message's metadata for
+inspection. Out-of-scope or no-match questions get the `I can only answer…` /
 `I don't have that information…` copy instead. **Inspect:** `GET /health/chroma` must show the
 `store_policies` collection; `guardrail_events` should contain `rag.scope`/`rag.no_match` only when
 those paths fire. Browser equivalent: `/help`.

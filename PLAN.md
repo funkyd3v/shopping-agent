@@ -282,7 +282,7 @@ Requirements:
 3. Retrieve top-k (k=4–6) from Chroma. Chroma returns a **distance**; convert to a similarity or use a documented distance threshold (cosine space). Do not compare a distance to a "similarity" threshold by accident.
 4. If no chunk passes the threshold → answer "I don't have that information" and suggest contacting support. **Do not answer from model memory.**
 5. Generate answer with the `rag` role, strictly grounded in retrieved context.
-6. Append a plain-text `Sources:` list (document title and section, deduplicated).
+6. Return only the grounded answer. Retrieval sources stay in server-side message metadata for evals/audit and are not displayed in the chat (2026-11-27 customization).
 7. If Chroma is unavailable, return a friendly "knowledge base unavailable" message; do not 500.
 
 **Scope guard:** RAG refuses questions outside store policy (products, cart, and orders are handled by `/assistant`) and points users there. Use a cheap heuristic first, then the shared intent classifier; define boundary examples in the eval set.
