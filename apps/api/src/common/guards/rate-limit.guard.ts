@@ -57,7 +57,7 @@ function envConfig(): RateLimitConfig {
 
 type Window = { start: number; count: number };
 
-type RequestWithUser = Request & { user?: { userId: string } };
+type RequestWithUser = Request & { user?: { userId: string }; guest?: boolean };
 
 @Injectable()
 export class RateLimitGuard implements CanActivate {
@@ -74,7 +74,8 @@ export class RateLimitGuard implements CanActivate {
     const req = ctx.switchToHttp().getRequest<RequestWithUser>();
     const group = rateLimitGroup(req.path ?? '');
     const limit = this.limits()[group];
-    const identity = req.user?.userId ?? req.ip ?? 'unknown';
+    // Guests can mint a new identity at will, so keep their budget keyed to IP.
+    const identity = req.guest ? (req.ip ?? 'unknown') : (req.user?.userId ?? req.ip ?? 'unknown');
     const key = `${group}:${identity}`;
     const now = Date.now();
 

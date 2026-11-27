@@ -7,6 +7,7 @@ import {
   chatSessionsQuerySchema,
 } from '@shopping-agent/shared';
 import { CurrentUser, requireUserId } from '../common/decorators/current-user.decorator';
+import { AllowAnonymous, Public } from '../common/decorators/public.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { ChatSessionService } from './chat-session.service';
 
@@ -15,6 +16,9 @@ import { ChatSessionService } from './chat-session.service';
 export class SessionsController {
   constructor(private readonly sessions: ChatSessionService) {}
 
+  // `/help` history is per guest browser, not a shared account.
+  @Public()
+  @AllowAnonymous()
   @Get()
   async list(
     @CurrentUser() ctx: { userId: string } | undefined,
@@ -24,6 +28,8 @@ export class SessionsController {
     return { sessions };
   }
 
+  @Public()
+  @AllowAnonymous()
   @Get(':id/messages')
   getMessages(
     @CurrentUser() ctx: { userId: string } | undefined,

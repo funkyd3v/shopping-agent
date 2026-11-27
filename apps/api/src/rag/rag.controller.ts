@@ -5,6 +5,7 @@ import { type PreparedTurn, parseMessageMetadata } from '../chat/chat-session.se
 import { openSseStream, startSseHeartbeat, writeSseEvent, writeSseText } from '../chat/chat-sse';
 import { getRequestContext } from '../common/context/request-context';
 import { CurrentUser, requireUserId } from '../common/decorators/current-user.decorator';
+import { AllowAnonymous, Public } from '../common/decorators/public.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { withRunDeadline } from '../common/run-deadline';
 import { RAG_COPY } from '../guardrails/guardrails.policy';
@@ -20,6 +21,10 @@ import { isTurnAborted } from './retriever';
 export class RagController {
   constructor(private readonly rag: RagService) {}
 
+  // Policy answers are public (PLAN §12.2); guests get an isolated identity
+  // from AnonymousIdentityGuard, so no cart/order/agent route is opened up.
+  @Public()
+  @AllowAnonymous()
   @Post('chat')
   async chat(
     @CurrentUser() ctx: { userId: string } | undefined,

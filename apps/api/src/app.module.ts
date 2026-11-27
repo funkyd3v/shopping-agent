@@ -8,6 +8,7 @@ import { CartModule } from './cart/cart.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { ChatModule } from './chat/chat.module';
 import { requestContextMiddleware } from './common/context/request-context';
+import { AnonymousIdentityGuard } from './common/guards/anonymous-identity.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import { originCheckMiddleware } from './common/middleware/origin-check.middleware';
@@ -49,9 +50,10 @@ import { UsersModule } from './users/users.module';
   controllers: [HealthController],
   providers: [
     ChromaHealthService,
-    // Global guards run in registration order: authenticate first, then limit
-    // by user (or IP for public routes). Both are global (PLAN §13/§21.4).
+    // Global guards run in registration order: authenticate first, give the
+    // public help routes a guest identity, then rate-limit by user/IP.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: AnonymousIdentityGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
   ],
 })

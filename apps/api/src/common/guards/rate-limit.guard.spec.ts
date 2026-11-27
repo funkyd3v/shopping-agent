@@ -77,6 +77,19 @@ describe('RateLimitGuard', () => {
     expect(sut.canActivate(context('/agent/chat', 'user-2'))).toBe(true);
   });
 
+  it('keys guests by IP so rotating guest identities cannot reset the budget', () => {
+    const guest = (userId: string) =>
+      ({
+        switchToHttp: () => ({
+          getRequest: () => ({ path: '/rag/chat', ip: '10.0.0.1', guest: true, user: { userId } }),
+        }),
+      }) as unknown as ExecutionContext;
+    const sut = guard();
+    expect(sut.canActivate(guest('guest-1'))).toBe(true);
+    expect(sut.canActivate(guest('guest-2'))).toBe(true);
+    expect(() => sut.canActivate(guest('guest-3'))).toThrow();
+  });
+
   it('resets the counter after the fixed window', () => {
     const sut = guard();
     expect(sut.canActivate(context('/auth/login', 'user-1'))).toBe(true);
