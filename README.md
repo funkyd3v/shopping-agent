@@ -1,117 +1,83 @@
-# shopping-agent
+# Shopping Agent
 
-AI-agent e-commerce MVP. Canonical spec: [`PLAN.md`](./PLAN.md).
+A demo store with an AI assistant that can actually shop for you. Ask it to find
+products, summarize reviews, add items to your cart, place an order, check out,
+cancel an order, or answer questions about shipping and returns. The assistant
+works on the same data you see on the store pages.
 
-**Start here:** [`AGENTS.md`](./AGENTS.md) → [`context/TRACKER.md`](./context/TRACKER.md) → [`context/README.md`](./context/README.md).
+This is a portfolio project: an AI agent connected to real application code,
+with limits and safety checks enforced in code rather than only in prompts.
 
-Two chats share one UI: `/help` answers store policies from Chroma (RAG), and
-`/assistant` routes across search, review, cart, order and history agents.
-Payments are mocked; do not enter real personal data.
+> **Under active development.** This is an MVP demo, not a production store.
+> Payments are simulated, all products and reviews are generated demo data, and
+> some planned work (browser end-to-end tests, extra operational tooling) is
+> still in progress. Please do not enter real personal information.
 
-## Local demo accounts
+## What you can try
 
-`pnpm db:reset` (migrate + seed) creates three accounts, all with password `Demo1234!`:
+- **Assistant chat:** “find wireless headphones under $80”, “add 2 of the second
+  one to my cart”, “checkout my cart”, “cancel my last order”.
+- **Help chat:** shipping, returns, warranty, payment and privacy questions,
+  with the source documents listed under each answer.
+- **Store pages:** browse products, manage the cart, and view orders — the same
+  records the assistant reads and writes.
+
+## Run it locally
+
+You need **Node.js 24+**, **pnpm**, and **Docker** (only for the help chat's
+knowledge base).
+
+```bash
+pnpm install
+cp .env.example .env
+# in .env: set JWT_SECRET (any random string of 32+ characters)
+#          and add GROQ_API_KEY / GOOGLE_API_KEY for live chat
+pnpm prisma:generate
+pnpm docker:up
+pnpm demo:reset
+pnpm dev
+```
+
+Open <http://localhost:3000> and sign in with a demo account. The API runs on
+port 3001. Two read-only checks are available at `/health` and `/health/chroma`.
+
+If Docker is not available, the store, cart, orders and assistant still run;
+only the help chat needs the local vector database.
+
+### Demo accounts
+
+All three accounts use the password `Demo1234!`.
 
 | Email | Name |
-|---|---|
+| --- | --- |
 | `alice@example.com` | Alice Chen |
 | `bob@example.com` | Bob Rivera |
 | `carol@example.com` | Carol Nguyen |
 
-The seed is idempotent; reruns do not duplicate users or addresses.
+The seed is repeatable — running it again will not duplicate data.
 
-## Bootstrap (local)
+## Tech and tools
 
-```bash
-pnpm install
-cp .env.example .env        # set JWT_SECRET (>=32 chars) and provider keys
-pnpm prisma:generate
-pnpm docker:up              # Chroma at 127.0.0.1:8000
-pnpm demo:reset             # migrate reset + seed + idempotent Chroma ingest
-pnpm dev                    # API :3001, web :3000 (shared watcher)
-```
+- **Web:** Next.js, React, Tailwind CSS
+- **API:** NestJS, TypeScript, Prisma, SQLite
+- **AI:** LangChain.js, LangGraph.js, Chroma, Groq and Gemini models
+- **Quality:** Vitest, Biome, GitHub Actions
+- **Runtime:** Node.js 24, pnpm, Docker Compose
 
-Open http://localhost:3000 and sign in with a demo account. `/health` (API+DB)
-and `/health/chroma` (index readiness) are public and read-only.
-
-If Docker is unavailable, Phase 3 was verified with a local
-`chromadb==1.5.9` server on `127.0.0.1:8000`; the app contract is unchanged.
-
-### Full Docker Compose demo
-
-```bash
-docker compose -f compose.demo.yml up -d
-# one-time bootstrap inside the api service (the named volume shadows host data):
-docker compose -f compose.demo.yml run --rm api \
-  sh -lc 'corepack enable && pnpm install --frozen-lockfile && pnpm prisma:generate && pnpm db:reset && pnpm rag:ingest'
-docker compose -f compose.demo.yml up
-```
-
-This brings up Chroma + API + web with an `api-data` volume for both SQLite
-files. Chroma stays bound to `127.0.0.1` on the host; the API reaches it at
-`http://chroma:8000` inside the compose network. See [`compose.demo.yml`](./compose.demo.yml).
-
-## Commands
+## Useful commands
 
 | Command | What it does |
-|---|---|
-| `pnpm dev` | Shared build watcher + API (:3001) + web (:3000) |
-| `pnpm db:reset` / `pnpm db:seed` | Rebuild / reseed SQLite (idempotent) |
-| `pnpm rag:ingest` / `pnpm rag:ingest:reset` | Idempotent policy ingest (7 sources, 52 chunks) |
-| `pnpm demo:reset` | `db:reset` + `rag:ingest` for a clean demo |
-| `pnpm run ci` | Biome → typecheck → Vitest → build |
-| `pnpm eval:guardrails` | Offline jailbreak/PII/redundancy/orders/cart pass rates (writes `evals/results/guardrails.json`) |
-| `pnpm eval:agents` | 15 replay agent scenarios (writes `evals/results/agents.json`) |
-| `pnpm eval:rag` | Live RAG retrieval + fact eval (needs Chroma + keys) |
-| `pnpm guardrails:inspect --rule jailbreak --limit 20` | Read-only `guardrail_events` audit |
-| `pnpm demo:smoke` | HTTP smoke of the end-to-end demo against a running API |
+| --- | --- |
+| `pnpm dev` | Start the web app and API together |
+| `pnpm demo:reset` | Rebuild the demo database and knowledge base |
+| `pnpm run ci` | Lint, type-check, test and build |
+| `pnpm eval:guardrails` | Run the offline safety checks |
+| `pnpm demo:smoke` | Check the running demo end to end |
 
-All unit and eval suites use `LLM_MODE=replay` and need no keys or network.
-`pnpm eval:rag` is the only live eval (Chroma + embedding + provider keys).
-`pnpm demo:smoke --help` lists options; scenarios that need a cassette or
-provider that is not configured report `SKIP` instead of `FAIL`.
+Unit tests and offline evaluations need no API keys or network access.
 
-## Demo script
+## More detail
 
-[`docs/demo-script.md`](./docs/demo-script.md) walks through all Phase 7
-scenarios with copy-pasteable curl commands and expected results: RAG,
-search/review, cart add/update/checkout, direct order, over-limit refusal,
-non-committal language, malicious review + "ok do it", jailbreak, PII, loop,
-budget exhaustion, provider failure, and abort/persist.
-
-## Guardrails and safety
-
-Rules are enforced in code, not prompts: PII redaction before providers and on
-output, token budgets, jailbreak pre-filter (with an opt-in small-model
-classifier), tool-output scanning, deterministic cart/order resolvers, server
-limits, output sanitizer, and redundancy short-circuit. Every action writes a
-`guardrail_events` row plus a structured log line. See
-[`context/guardrails.md`](./context/guardrails.md) and
-[`docs/decisions.md`](./docs/decisions.md).
-
-Key env overrides (all validated by zod; defaults in the policy files):
-
-| Var | Default | Purpose |
-|---|---|---|
-| `LLM_MODE` | `live` | `replay` for tests/demos without network |
-| `PROVIDER_DISABLE` | empty | Comma-separated ids to force fallback (e.g. `groq`) |
-| `JAILBREAK_THRESHOLD` | `0.8` | Block score |
-| `JAILBREAK_LIVE_CLASSIFIER` | `false` | Opt-in `guardrail` chain for gray-zone text |
-| `REDUNDANCY_SIMILARITY_THRESHOLD` | `0.9` | Normalized-token Jaccard short-circuit |
-| `REQUEST_TOKEN_BUDGET` / `SESSION_TOKEN_BUDGET` / `DAILY_TOKEN_BUDGET` | 16k / 150k / 500k | Usage limits |
-| `RUN_DEADLINE_MS` | 90000 | Per-run wall-clock limit; friendly SSE error on expiry |
-| `MAX_ORDER_USD` / `MAX_QTY_PER_ITEM` / `CANCEL_WINDOW_MINUTES` | 200 / 5 / 30 | Order limits |
-| `RATE_LIMIT_AUTH` / `RATE_LIMIT_CHAT` / `RATE_LIMIT_CART` / `RATE_LIMIT_CHECKOUT` | 10 / 20 / 60 / 10 | Requests per minute, per user (or IP when public) |
-
-## Troubleshooting
-
-- **Chat returns a friendly refusal with no answer:** check `pnpm guardrails:inspect`
-  for the rule (`jailbreak`, `budget`, `rag.scope`, `redundancy.*`).
-- **`/help` says the knowledge base is unavailable:** Chroma is down or the
-  index metadata drifted; re-run `pnpm rag:ingest` and check `/health/chroma`.
-- **Replay tests fail with `LLM_MODE_NO_CASSETTE`:** the message/prompt changed;
-  re-record a synthetic cassette (never commit real PII) or use live mode.
-- **Provider failure:** set `PROVIDER_DISABLE=groq` to exercise Gemini fallback;
-  the gateway logs `chain`, `provider`, `model` and `attempt` for each served call.
-
-Deployment topology and ops notes: [`PLAN.md`](./PLAN.md) §21.
+- [`PLAN.md`](./PLAN.md) — the build plan and acceptance criteria
+- [`docs/demo-script.md`](./docs/demo-script.md) — a guided walkthrough
+- [`docs/decisions.md`](./docs/decisions.md) — design choices and assumptions

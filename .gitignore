@@ -35,6 +35,13 @@ yarn-error.log*
 # ── Generated eval results ────────────────────────────────────
 evals/results/
 
+# ── Local agent tooling (not part of the project) ─────────────
+.opencode/skills/
+
+# ── Generated LLM recordings ──────────────────────────────────
+apps/api/cassettes/
+evals/cassettes/*.json
+
 # ── Tests and coverage ────────────────────────────────────────
 coverage/
 test-results/
