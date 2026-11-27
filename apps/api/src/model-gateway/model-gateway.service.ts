@@ -6,8 +6,9 @@ import {
   ToolMessage,
 } from '@langchain/core/messages';
 import { tool as langchainTool } from '@langchain/core/tools';
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import type { z } from 'zod';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { z } from 'zod';
+import { getEnv } from '../config/env';
 import { CassetteStore } from './cassette.store';
 import {
   type Capability,
@@ -42,6 +43,20 @@ export interface GatewayToolCall {
   args: unknown;
 }
 
+/** Usage reported by the provider, or estimated by the gateway/callers. */
+export type GatewayUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  estimated: boolean;
+};
+
+export type TextInvokeResult = { content: string; usage?: GatewayUsage };
+export type ToolInvokeResult = {
+  content: string;
+  toolCalls: GatewayToolCall[];
+  usage?: GatewayUsage;
+};
+
 /** Pluggable tool transport so tests can script model tool calls offline. */
 export type ToolInvokeFn = (args: {
   provider: ProviderId;
@@ -50,7 +65,7 @@ export type ToolInvokeFn = (args: {
   tools: ToolSpec[];
   maxOutputTokens: number;
   temperature?: number;
-}) => Promise<{ content: string; toolCalls: GatewayToolCall[] }>;
+}) => Promise<ToolInvokeResult>;
 
 export interface ToolGatewayRequest extends GatewayRequest {
   tools: ToolSpec[];
@@ -67,7 +82,7 @@ export type InvokeFn = (args: {
   messages: ChatMessage[];
   maxOutputTokens: number;
   temperature?: number;
-}) => Promise<string>;
+}) => Promise<string | TextInvokeResult>;
 
 export interface GatewayRequest {
   chain: keyof typeof CHAINS | string;
@@ -91,6 +106,8 @@ export interface GatewayResult {
   /** Which chain position served the request (0 = primary). */
   attempt: number;
   elapsedMs: number;
+  /** Provider usage when available; otherwise an estimate. */
+  usage?: GatewayUsage;
 }
 
 export class GatewayError extends Error {
@@ -112,6 +129,7 @@ type ChatInvoker = {
   ): Promise<{
     content: unknown;
     tool_calls?: Array<{ id?: string; name: string; args?: unknown }>;
+    usage_metadata?: { input_tokens?: number; output_tokens?: number };
   }>;
 };
 
@@ -122,10 +140,39 @@ type ChatModelLike = ChatInvoker & {
 const QUOTA_ERROR = /quota|rate.?limit|429|resource.?exhausted|too many requests/i;
 const PROVIDER_COOLDOWN_MS = 60_000;
 const PROVIDER_BREAK_THRESHOLD = 3;
+const RETRYABLE_CODES = new Set(['PROVIDER_QUOTA', 'UPSTREAM_ERROR', 'TIMEOUT']);
+const FATAL_CODES = new Set([
+  'NO_MODEL_AVAILABLE',
+  'NO_CASSETTE',
+  'ABORTED',
+  'BAD_REQUEST',
+  'UNAUTHORIZED',
+  'FORBIDDEN',
+]);
+const FATAL_STATUS_CODES: Record<number, string> = {
+  400: 'BAD_REQUEST',
+  401: 'UNAUTHORIZED',
+  403: 'FORBIDDEN',
+};
+
+export const GATEWAY_RETRY_CONFIG = Symbol('GATEWAY_RETRY_CONFIG');
+
+export type GatewayRetryConfig = {
+  /** Base delay before the first retry; doubled per attempt. */
+  baseMs: number;
+  /** Upper bound for the exponential delay (jitter is added on top). */
+  maxMs: number;
+  jitter: boolean;
+};
+
+const DEFAULT_RETRY: GatewayRetryConfig = { baseMs: 100, maxMs: 1_000, jitter: true };
 
 interface ProviderState {
   consecutiveQuotaErrors: number;
   disabledUntil: number;
+  /** Reset at UTC midnight; enforces PROVIDER_DAILY_TOKEN_BUDGET (§6). */
+  tokensToday: number;
+  dayStart: number;
 }
 
 /**
@@ -145,6 +192,9 @@ export class ModelGatewayService {
     private readonly cassettes: CassetteStore,
     @Optional() private readonly invokeFn?: InvokeFn,
     @Optional() private readonly toolInvokeFn?: ToolInvokeFn,
+    @Optional()
+    @Inject(GATEWAY_RETRY_CONFIG)
+    private readonly retry?: GatewayRetryConfig,
   ) {
     this.forcedDisabled = new Set(
       (process.env.PROVIDER_DISABLE ?? '')
@@ -152,8 +202,14 @@ export class ModelGatewayService {
         .map((s) => s.trim().toLowerCase())
         .filter((s): s is ProviderId => s === 'groq' || s === 'gemini'),
     );
+    const dayStart = startOfUtcDayMs();
     for (const p of Object.keys(PROVIDER_CONFIG) as ProviderId[]) {
-      this.providers.set(p, { consecutiveQuotaErrors: 0, disabledUntil: 0 });
+      this.providers.set(p, {
+        consecutiveQuotaErrors: 0,
+        disabledUntil: 0,
+        tokensToday: 0,
+        dayStart,
+      });
     }
   }
 
@@ -169,24 +225,30 @@ export class ModelGatewayService {
       }
       const entry = candidates[i] as ModelEntry;
       try {
-        const content = await this.invokeWithTimeout(entry, req);
+        const result = await this.invokeWithTimeout(entry, req);
         this.recordSuccess(entry.provider);
+        const usage = result.usage ?? this.estimateUsage(req.messages, result.content);
+        this.consumeProviderTokens(entry.provider, usage);
         const elapsedMs = Date.now() - started;
         // Phase 1 acceptance: every served call is logged with provider + model.
         this.logger.log(
           `gateway: chain=${req.chain} provider=${entry.provider} model=${entry.model} attempt=${i + 1} elapsedMs=${elapsedMs}`,
         );
         return {
-          content,
+          content: result.content,
           provider: entry.provider,
           model: entry.model,
           attempt: i,
           elapsedMs,
+          usage,
         };
       } catch (err) {
         lastError = err;
         this.logFallback(entry, err);
         this.rethrowFatal(entry, err);
+        if (i < candidates.length - 1 && this.isRetryable(err)) {
+          await this.backoff(i, req.signal);
+        }
       }
     }
 
@@ -213,6 +275,9 @@ export class ModelGatewayService {
       try {
         const result = await this.invokeToolsWithTimeout(entry, req);
         this.recordSuccess(entry.provider);
+        const output = `${result.content}${JSON.stringify(result.toolCalls)}`;
+        const usage = result.usage ?? this.estimateUsage(req.messages, output);
+        this.consumeProviderTokens(entry.provider, usage);
         const elapsedMs = Date.now() - started;
         this.logger.log(
           `gateway: chain=${req.chain} provider=${entry.provider} model=${entry.model} tools=${req.tools.length} toolCalls=${result.toolCalls.length} attempt=${i + 1} elapsedMs=${elapsedMs}`,
@@ -224,11 +289,15 @@ export class ModelGatewayService {
           model: entry.model,
           attempt: i,
           elapsedMs,
+          usage,
         };
       } catch (err) {
         lastError = err;
         this.logFallback(entry, err);
         this.rethrowFatal(entry, err);
+        if (i < candidates.length - 1 && this.isRetryable(err)) {
+          await this.backoff(i, req.signal);
+        }
       }
     }
 
@@ -266,18 +335,41 @@ export class ModelGatewayService {
     this.logger.warn(`gateway fallback: ${entry.provider}/${entry.model} failed (${reason})`);
   }
 
-  /** Never retry fatal conditions on the next provider. */
+  /** Never retry fatal conditions on the next provider (PLAN §6). */
   private rethrowFatal(entry: ModelEntry, err: unknown): void {
-    if (
-      err instanceof GatewayError &&
-      (err.code === 'NO_MODEL_AVAILABLE' || err.code === 'NO_CASSETTE' || err.code === 'ABORTED')
-    ) {
+    if (err instanceof GatewayError && FATAL_CODES.has(err.code)) {
       throw err;
     }
     // Quota errors trip the provider breaker; others just fall through.
     if (err instanceof GatewayError && err.code === 'PROVIDER_QUOTA') {
       this.recordQuotaError(entry.provider);
     }
+  }
+
+  /** 429/5xx/timeouts retry the next candidate with capped exponential backoff. */
+  private isRetryable(err: unknown): boolean {
+    return err instanceof GatewayError && RETRYABLE_CODES.has(err.code);
+  }
+
+  private async backoff(attempt: number, signal: AbortSignal | undefined): Promise<void> {
+    if (signal?.aborted) throw new GatewayError('Request aborted', 'ABORTED', 499);
+    const config = this.retry ?? DEFAULT_RETRY;
+    const capped = Math.min(config.maxMs, config.baseMs * 2 ** attempt);
+    const delay = config.jitter
+      ? capped + Math.floor(Math.random() * Math.max(1, config.baseMs))
+      : capped;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, delay);
+      signal?.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true },
+      );
+    });
+    if (signal?.aborted) throw new GatewayError('Request aborted', 'ABORTED', 499);
   }
 
   /** Health snapshot for /gateway/config — no secrets, no keys. */
@@ -302,11 +394,56 @@ export class ModelGatewayService {
     if (this.forcedDisabled.has(model.provider)) return false;
     if (!process.env[PROVIDER_CONFIG[model.provider].keyEnvVar]) return false;
     const state = this.providers.get(model.provider);
-    if (state && state.disabledUntil > Date.now()) return false;
+    if (state) {
+      this.rolloverProviderDay(state);
+      if (state.disabledUntil > Date.now()) return false;
+      if (state.tokensToday >= this.dailyBudget()) return false;
+    }
     return require.every((c) => model.capabilities.includes(c));
   }
 
-  private async invokeWithTimeout(entry: ModelEntry, req: GatewayRequest): Promise<string> {
+  private dailyBudget(): number {
+    const fromEnv = Number(process.env.PROVIDER_DAILY_TOKEN_BUDGET);
+    if (Number.isFinite(fromEnv) && fromEnv > 0) return Math.floor(fromEnv);
+    try {
+      return getEnv().PROVIDER_DAILY_TOKEN_BUDGET;
+    } catch {
+      return 1_000_000;
+    }
+  }
+
+  private rolloverProviderDay(state: ProviderState): void {
+    const dayStart = startOfUtcDayMs();
+    if (state.dayStart !== dayStart) {
+      state.dayStart = dayStart;
+      state.tokensToday = 0;
+      state.consecutiveQuotaErrors = 0;
+    }
+  }
+
+  private consumeProviderTokens(provider: ProviderId, usage: GatewayUsage): void {
+    const state = this.providers.get(provider);
+    if (!state) return;
+    this.rolloverProviderDay(state);
+    state.tokensToday += Math.max(0, usage.inputTokens + usage.outputTokens);
+  }
+
+  private estimateUsage(messages: ChatMessage[], output: string): GatewayUsage {
+    const input = messages.reduce((sum, message) => {
+      const toolArgs = message.toolCalls ? JSON.stringify(message.toolCalls) : '';
+      return sum + message.content.length + toolArgs.length;
+    }, 0);
+    return {
+      inputTokens: Math.ceil(input / 4),
+      outputTokens: Math.ceil(output.length / 4),
+      estimated: true,
+    };
+  }
+
+  private async invokeWithTimeout(
+    entry: ModelEntry,
+    req: GatewayRequest,
+  ): Promise<TextInvokeResult> {
     if (req.signal?.aborted) {
       throw new GatewayError('Model call aborted', 'ABORTED', 499);
     }
@@ -318,7 +455,9 @@ export class ModelGatewayService {
     if (!this.invokeFn) {
       cassetteKey = this.cassettes.key(entry.provider, entry.model, req.chain, req.messages);
       const replayed = this.cassettes.load(cassetteKey);
-      if (replayed !== null) return replayed;
+      if (replayed !== null) {
+        return { content: replayed, usage: this.estimateUsage(req.messages, replayed) };
+      }
       if ((process.env.LLM_MODE ?? 'live') === 'replay') {
         // Never fall through to the network in replay mode (tests need no keys).
         throw new GatewayError(
@@ -329,7 +468,7 @@ export class ModelGatewayService {
       }
     }
 
-    const content = await this.raceWithTimeout(async () => {
+    const raw = await this.raceWithTimeout(async () => {
       if (this.invokeFn) {
         return this.invokeFn({
           provider: entry.provider,
@@ -341,15 +480,15 @@ export class ModelGatewayService {
       }
       return this.defaultInvoke(entry, req);
     }, req.signal);
-
-    if (cassetteKey !== null) this.cassettes.save(cassetteKey, content);
-    return content;
+    const result = normalizeTextResult(raw);
+    if (cassetteKey !== null) this.cassettes.save(cassetteKey, result.content);
+    return result;
   }
 
   private async invokeToolsWithTimeout(
     entry: ModelEntry,
     req: ToolGatewayRequest,
-  ): Promise<{ content: string; toolCalls: GatewayToolCall[] }> {
+  ): Promise<ToolInvokeResult> {
     if (req.signal?.aborted) {
       throw new GatewayError('Model call aborted', 'ABORTED', 499);
     }
@@ -358,13 +497,24 @@ export class ModelGatewayService {
     if (!this.toolInvokeFn) {
       // Tool schema is part of the key (PLAN §6): the same prompt with a
       // different toolset must not replay an incompatible response.
-      cassetteKey = this.cassettes.key(entry.provider, entry.model, req.chain, {
-        messages: req.messages,
-        tools: req.tools.map((t) => ({ name: t.name, description: t.description })),
-      });
+      cassetteKey = this.cassettes.key(
+        entry.provider,
+        entry.model,
+        req.chain,
+        req.messages,
+        toolSchemaFingerprint(req.tools),
+      );
       const replayed = this.cassettes.loadJson(cassetteKey);
       const parsed = parseToolCassette(replayed);
-      if (parsed) return parsed;
+      if (parsed) {
+        return {
+          ...parsed,
+          usage: this.estimateUsage(
+            req.messages,
+            `${parsed.content}${JSON.stringify(parsed.toolCalls)}`,
+          ),
+        };
+      }
       if ((process.env.LLM_MODE ?? 'live') === 'replay') {
         throw new GatewayError(
           `No cassette for ${entry.provider}/${entry.model}`,
@@ -390,11 +540,12 @@ export class ModelGatewayService {
 
     // Normalize injected transports too: some providers return JSON-string args
     // or omit call ids, and downstream tools need a stable shape.
-    const normalized = {
+    const normalized: ToolInvokeResult = {
       content: result.content,
       toolCalls: normalizeToolCalls(
         result.toolCalls as Array<{ id?: string; name: string; args?: unknown }>,
       ),
+      ...(result.usage ? { usage: result.usage } : {}),
     };
     if (cassetteKey !== null) this.cassettes.saveJson(cassetteKey, normalized);
     return normalized;
@@ -424,8 +575,14 @@ export class ModelGatewayService {
       ]);
     } catch (err) {
       if (err instanceof GatewayError) throw err;
+      const status = providerStatus(err);
+      const fatalCode = status ? FATAL_STATUS_CODES[status] : undefined;
+      if (fatalCode && status) {
+        // 400/401/403 are caller/provider configuration errors: never retry.
+        throw new GatewayError(`Provider rejected the request (${status})`, fatalCode, status);
+      }
       const message = err instanceof Error ? err.message : String(err);
-      if (QUOTA_ERROR.test(message)) {
+      if (QUOTA_ERROR.test(message) || status === 429) {
         throw new GatewayError(`Provider quota exceeded: ${message}`, 'PROVIDER_QUOTA', 429);
       }
       throw new GatewayError(message, 'UPSTREAM_ERROR', 502);
@@ -439,18 +596,18 @@ export class ModelGatewayService {
    * Default transport built lazily from the pinned LangChain provider packages.
    * Kept as a method so unit tests never load provider SDKs.
    */
-  private async defaultInvoke(entry: ModelEntry, req: GatewayRequest): Promise<string> {
+  private async defaultInvoke(entry: ModelEntry, req: GatewayRequest): Promise<TextInvokeResult> {
     const llm = await this.buildChatModel(entry, req.temperature);
     const result = await llm.invoke(toLangChainMessages(req.messages), { signal: req.signal });
     const text = typeof result.content === 'string' ? result.content : '';
     if (!text) throw new GatewayError('Empty model response', 'UPSTREAM_ERROR', 502);
-    return text;
+    return { content: text, ...usageFromMetadata(result.usage_metadata) };
   }
 
   private async defaultInvokeTools(
     entry: ModelEntry,
     req: ToolGatewayRequest,
-  ): Promise<{ content: string; toolCalls: GatewayToolCall[] }> {
+  ): Promise<ToolInvokeResult> {
     const llm = await this.buildChatModel(entry, req.temperature);
     if (!llm.bindTools) {
       throw new GatewayError('Model does not support tool calling', 'NO_MODEL_AVAILABLE', 503);
@@ -472,7 +629,7 @@ export class ModelGatewayService {
     if (!content && toolCalls.length === 0) {
       throw new GatewayError('Empty model response', 'UPSTREAM_ERROR', 502);
     }
-    return { content, toolCalls };
+    return { content, toolCalls, ...usageFromMetadata(result.usage_metadata) };
   }
 
   private async buildChatModel(
@@ -481,20 +638,21 @@ export class ModelGatewayService {
   ): Promise<ChatModelLike> {
     const { ChatGroq } = await import('@langchain/groq');
     const { ChatGoogleGenerativeAI } = await import('@langchain/google-genai');
+    const effectiveTemperature = temperature ?? entry.temperature;
 
     if (entry.provider === 'groq') {
       return new ChatGroq({
         apiKey: process.env.GROQ_API_KEY,
         model: entry.model,
         maxTokens: entry.maxOutputTokens,
-        temperature: temperature ?? 0,
+        temperature: effectiveTemperature,
       }) as unknown as ChatModelLike;
     }
     return new ChatGoogleGenerativeAI({
       apiKey: process.env.GOOGLE_API_KEY,
       model: entry.model,
       maxOutputTokens: entry.maxOutputTokens,
-      temperature: temperature ?? 0,
+      temperature: effectiveTemperature,
     }) as unknown as ChatModelLike;
   }
 
@@ -537,6 +695,51 @@ function toLangChainMessages(messages: ChatMessage[]): BaseMessage[] {
       return new AIMessage(message.content);
     }
     return new HumanMessage(message.content);
+  });
+}
+
+function startOfUtcDayMs(): number {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+}
+
+/** Provider SDKs expose the HTTP status under different property names. */
+function providerStatus(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const candidate =
+    (err as { status?: unknown; statusCode?: unknown }).status ??
+    (err as { statusCode?: unknown }).statusCode;
+  return typeof candidate === 'number' && Number.isInteger(candidate) ? candidate : undefined;
+}
+
+function usageFromMetadata(
+  metadata: { input_tokens?: number; output_tokens?: number } | undefined,
+): { usage: GatewayUsage } | Record<string, never> {
+  if (!metadata) return {};
+  const inputTokens = Number(metadata.input_tokens);
+  const outputTokens = Number(metadata.output_tokens);
+  if (!Number.isFinite(inputTokens) && !Number.isFinite(outputTokens)) return {};
+  return {
+    usage: {
+      inputTokens: Number.isFinite(inputTokens) ? inputTokens : 0,
+      outputTokens: Number.isFinite(outputTokens) ? outputTokens : 0,
+      estimated: false,
+    },
+  };
+}
+
+function normalizeTextResult(raw: string | TextInvokeResult): TextInvokeResult {
+  return typeof raw === 'string' ? { content: raw } : raw;
+}
+
+/** Stable zod-schema fingerprint for cassette keys (PLAN §6/§17). */
+function toolSchemaFingerprint(tools: ToolSpec[]): unknown[] {
+  return tools.map((spec) => {
+    try {
+      return { name: spec.name, schema: z.toJSONSchema(spec.schema) };
+    } catch {
+      return { name: spec.name, schema: spec.schema.toString() };
+    }
   });
 }
 

@@ -40,7 +40,8 @@ export type OrderRefusalCode =
   | 'ORDER_LIMIT'
   | 'OUT_OF_STOCK'
   | 'NO_ADDRESS'
-  | 'CANCEL_WINDOW_CLOSED';
+  | 'CANCEL_WINDOW_CLOSED'
+  | 'DB_BUSY';
 
 /** Structured refusal (PLAN §9.3): `code`, `limit`, `actual`, `allowed`. */
 export type OrderRefusal = {

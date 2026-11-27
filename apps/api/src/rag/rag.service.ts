@@ -288,7 +288,8 @@ export class RagService {
     }
     if (ctx.signal.aborted) throw new TurnAbortedError();
 
-    let answer = sanitizeAnswer(rawAnswer, settings.maxAnswerChars);
+    // Output order (PLAN §10.2): PII mask → redundancy → output format.
+    let answer = rawAnswer;
     const masked = redactPii(answer);
     if (masked.findings.length > 0) {
       await this.guardrails.record({
@@ -302,16 +303,6 @@ export class RagService {
       });
       answer = masked.text;
     }
-    if (answer.trim().length === 0) {
-      await this.guardrails.record({
-        userId,
-        sessionId: session.id,
-        rule: 'rag.empty_output',
-        action: 'degrade',
-      });
-      return this.providerFailure(turn, usage);
-    }
-
     const redundant = detectRedundancy({
       reply: answer,
       assistantHistory: history
@@ -330,6 +321,17 @@ export class RagService {
         details: { reason: redundant.reason },
       });
       return this.finish(turn, GUARDRAIL_COPY.redundancy, 'ok', [], usage);
+    }
+
+    answer = sanitizeAnswer(answer, settings.maxAnswerChars);
+    if (answer.trim().length === 0) {
+      await this.guardrails.record({
+        userId,
+        sessionId: session.id,
+        rule: 'rag.empty_output',
+        action: 'degrade',
+      });
+      return this.providerFailure(turn, usage);
     }
 
     const sources = sourcesFromChunks(relevant, settings.maxSources);
@@ -359,11 +361,18 @@ export class RagService {
     temperature: number;
   }): Promise<string> {
     const started = Date.now();
-    let result: { content: string; provider: string; model: string };
+    let result: {
+      content: string;
+      provider: string;
+      model: string;
+      usage?: { inputTokens: number; outputTokens: number; estimated: boolean };
+    };
     try {
       result = await this.gateway.generate({
         chain: input.chain,
         messages: input.messages,
+        // Classifier/condenser turns require structured JSON output (PLAN §6).
+        require: input.chain === 'guardrail' || input.chain === 'router' ? ['json'] : undefined,
         temperature: input.temperature,
         signal: input.ctx.signal,
       });
@@ -375,10 +384,18 @@ export class RagService {
     }
     if (input.ctx.signal.aborted) throw new TurnAbortedError();
 
-    const inputTokens = estimateTokens(input.messages.map((message) => message.content).join('\n'));
-    const outputTokens = estimateTokens(result.content);
-    input.usage.inputTokens += inputTokens;
-    input.usage.outputTokens += outputTokens;
+    const estimatedInput = estimateTokens(
+      input.messages.map((message) => message.content).join('\n'),
+    );
+    const usage = result.usage ?? {
+      inputTokens: estimatedInput,
+      outputTokens: estimateTokens(result.content),
+      estimated: true,
+    };
+    const firstCall = input.usage.inputTokens === 0 && input.usage.outputTokens === 0;
+    input.usage.estimated = firstCall ? usage.estimated : input.usage.estimated || usage.estimated;
+    input.usage.inputTokens += usage.inputTokens;
+    input.usage.outputTokens += usage.outputTokens;
     await this.budgets.record({
       userId: input.turn.session.userId,
       sessionId: input.turn.session.id,
@@ -386,9 +403,9 @@ export class RagService {
       kind: input.kind,
       model: result.model,
       provider: result.provider,
-      inputTokens,
-      outputTokens,
-      estimated: true,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      estimated: usage.estimated,
       latencyMs: Date.now() - started,
     });
     return result.content;

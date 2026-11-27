@@ -275,9 +275,9 @@ export async function classifyJailbreak(input: {
       source: 'model',
     };
   } catch {
-    // Degraded mode: allow read-only, block side effects when the pre-filter
-    // already saw something suspicious.
-    const blocked = Boolean(input.sideEffects) && heuristic.score >= JAILBREAK_POLICY.grayZone;
+    // Degraded mode (PLAN §10.4): read-only chat is allowed, but every
+    // cart/order side effect is blocked until the classifier is healthy again.
+    const blocked = Boolean(input.sideEffects) && JAILBREAK_POLICY.failMode.sideEffects === 'block';
     return {
       ...heuristic,
       blocked: heuristic.blocked || blocked,

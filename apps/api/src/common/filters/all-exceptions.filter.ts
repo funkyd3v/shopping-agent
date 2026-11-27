@@ -21,6 +21,7 @@ const SAFE_SERVER_MESSAGES: Partial<Record<ErrorCode, string>> = {
   PROVIDER_UNAVAILABLE: 'The AI service is temporarily unavailable. Please try again.',
   BUDGET_EXHAUSTED: 'The usage limit has been reached. Please try again later.',
   LLM_MODE_NO_CASSETTE: 'This request has no recorded response.',
+  DB_BUSY: 'The store is busy right now. Nothing was changed; please try again.',
 };
 
 /**

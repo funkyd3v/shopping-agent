@@ -1,10 +1,17 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  type HttpException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { OrderDetail } from '@shopping-agent/shared';
 import { ulid } from 'ulid';
 import { WriteMutex } from '../common/write-mutex';
 import { PrismaService } from '../db/prisma.service';
 import type { Prisma } from '../generated/prisma/client';
-import { GuardrailService } from '../guardrails/guardrail.service';
+import { type GuardrailAction, GuardrailService } from '../guardrails/guardrail.service';
 import { toOrderDetail } from './order.mapper';
 import {
   cancellableUntil,
@@ -84,77 +91,85 @@ export class OrderWriteService {
 
       let order: OrderRow;
       try {
-        const address = await this.loadAddress(actor.userId);
-        if (!address) {
-          throw refusal({
-            code: 'NO_ADDRESS',
-            message: 'Add a shipping address to your account before placing an order.',
-          });
-        }
-
-        order = await this.prisma.$transaction(async (tx) => {
-          const { cartId, items } = await input.loadLines(tx);
-          const lines = await this.reprice(tx, items);
-          const daily =
-            actor.placedBy === 'agent' ? await this.dailyUsage(tx, actor.userId) : EMPTY_USAGE;
-          const denied = evaluateOrder(lines, limits, daily);
-          if (denied) throw refusal(denied);
-
-          const now = new Date();
-          const totalCents = lines.reduce((sum, line) => sum + line.qty * line.unitPriceCents, 0);
-          const id = ulid();
-          const created = await tx.order.create({
-            data: {
-              id,
-              orderNumber: await this.nextOrderNumber(tx),
-              userId: actor.userId,
-              status: 'placed',
-              source: input.source,
-              placedBy: actor.placedBy,
-              totalCents,
-              currency: 'USD',
-              idempotencyKey: input.idempotencyKey,
-              cartId,
-              addressSnapshotJson: JSON.stringify(address),
-              turnId: actor.turnId ?? null,
-              clientMessageId: actor.clientMessageId ?? null,
-              cancellableUntil: cancellableUntil(now, limits),
-              items: {
-                create: lines.map((line) => ({
-                  id: ulid(),
-                  productId: line.productId,
-                  productName: line.name,
-                  sku: line.sku,
-                  qty: line.qty,
-                  unitPriceCents: line.unitPriceCents,
-                })),
-              },
-            },
-            include: { items: { orderBy: { id: 'asc' } } },
-          });
-
-          // All-or-nothing stock: any zero count aborts the transaction.
-          for (const line of lines) {
-            const decremented = await tx.product.updateMany({
-              where: { id: line.productId, stock: { gte: line.qty } },
-              data: { stock: { decrement: line.qty } },
-            });
-            if (decremented.count === 0) {
+        order = await this.withBusyRetry(
+          async () => {
+            const address = await this.loadAddress(actor.userId);
+            if (!address) {
               throw refusal({
-                code: 'OUT_OF_STOCK',
-                message: `Only ${line.stock} of ${line.name} ${
-                  line.stock === 1 ? 'is' : 'are'
-                } available.`,
-                productId: line.productId,
-                actual: line.stock,
-                allowed: line.stock,
+                code: 'NO_ADDRESS',
+                message: 'Add a shipping address to your account before placing an order.',
               });
             }
-          }
+            return this.prisma.$transaction(async (tx) => {
+              const { cartId, items } = await input.loadLines(tx);
+              const lines = await this.reprice(tx, items);
+              const daily =
+                actor.placedBy === 'agent' ? await this.dailyUsage(tx, actor.userId) : EMPTY_USAGE;
+              const denied = evaluateOrder(lines, limits, daily);
+              if (denied) throw refusal(denied);
 
-          if (cartId) await tx.cartItem.deleteMany({ where: { cartId } });
-          return created;
-        });
+              const now = new Date();
+              const totalCents = lines.reduce(
+                (sum, line) => sum + line.qty * line.unitPriceCents,
+                0,
+              );
+              const id = ulid();
+              const created = await tx.order.create({
+                data: {
+                  id,
+                  orderNumber: await this.nextOrderNumber(tx),
+                  userId: actor.userId,
+                  status: 'placed',
+                  source: input.source,
+                  placedBy: actor.placedBy,
+                  totalCents,
+                  currency: 'USD',
+                  idempotencyKey: input.idempotencyKey,
+                  cartId,
+                  addressSnapshotJson: JSON.stringify(address),
+                  turnId: actor.turnId ?? null,
+                  clientMessageId: actor.clientMessageId ?? null,
+                  cancellableUntil: cancellableUntil(now, limits),
+                  items: {
+                    create: lines.map((line) => ({
+                      id: ulid(),
+                      productId: line.productId,
+                      productName: line.name,
+                      sku: line.sku,
+                      qty: line.qty,
+                      unitPriceCents: line.unitPriceCents,
+                    })),
+                  },
+                },
+                include: { items: { orderBy: { id: 'asc' } } },
+              });
+
+              // All-or-nothing stock: any zero count aborts the transaction.
+              for (const line of lines) {
+                const decremented = await tx.product.updateMany({
+                  where: { id: line.productId, stock: { gte: line.qty } },
+                  data: { stock: { decrement: line.qty } },
+                });
+                if (decremented.count === 0) {
+                  throw refusal({
+                    code: 'OUT_OF_STOCK',
+                    message: `Only ${line.stock} of ${line.name} ${
+                      line.stock === 1 ? 'is' : 'are'
+                    } available.`,
+                    productId: line.productId,
+                    actual: line.stock,
+                    allowed: line.stock,
+                  });
+                }
+              }
+
+              if (cartId) await tx.cartItem.deleteMany({ where: { cartId } });
+              return created;
+            });
+          },
+          actor,
+          input.source,
+        );
       } catch (error) {
         if (error instanceof OrderRefusalError) {
           await this.record(actor, 'order.refuse', 'refuse', {
@@ -248,29 +263,34 @@ export class OrderWriteService {
 
       let order: OrderRow;
       try {
-        order = await this.prisma.$transaction(async (tx) => {
-          const updated = await tx.order.updateMany({
-            where: {
-              id: existing.id,
-              userId: actor.userId,
-              status: 'placed',
-              cancellableUntil: { gt: now },
-            },
-            data: { status: 'cancelled', cancelledAt: now, cancelledBy: actor.placedBy },
-          });
-          if (updated.count === 0) throw refusal(cancelRaceRefusal(existing, now));
+        order = await this.withBusyRetry(
+          async () =>
+            this.prisma.$transaction(async (tx) => {
+              const updated = await tx.order.updateMany({
+                where: {
+                  id: existing.id,
+                  userId: actor.userId,
+                  status: 'placed',
+                  cancellableUntil: { gt: now },
+                },
+                data: { status: 'cancelled', cancelledAt: now, cancelledBy: actor.placedBy },
+              });
+              if (updated.count === 0) throw refusal(cancelRaceRefusal(existing, now));
 
-          for (const item of existing.items) {
-            await tx.product.update({
-              where: { id: item.productId },
-              data: { stock: { increment: item.qty } },
-            });
-          }
-          return await tx.order.findUniqueOrThrow({
-            where: { id: existing.id },
-            include: { items: { orderBy: { id: 'asc' } } },
-          });
-        });
+              for (const item of existing.items) {
+                await tx.product.update({
+                  where: { id: item.productId },
+                  data: { stock: { increment: item.qty } },
+                });
+              }
+              return await tx.order.findUniqueOrThrow({
+                where: { id: existing.id },
+                include: { items: { orderBy: { id: 'asc' } } },
+              });
+            }),
+          actor,
+          existing.source,
+        );
       } catch (error) {
         if (error instanceof OrderRefusalError) {
           await this.record(actor, 'order.refuse', 'refuse', {
@@ -409,10 +429,37 @@ export class OrderWriteService {
     });
   }
 
+  /**
+   * SQLite busy/in-flight conflicts: retry once, then a structured refusal
+   * (PLAN §10.4). The cart is untouched because the transaction rolls back.
+   */
+  private async withBusyRetry<T>(
+    action: () => Promise<T>,
+    actor: OrderActor,
+    source: string,
+  ): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (!isBusyError(error)) throw error;
+      await this.record(actor, 'order.db_busy', 'degrade', { source, retry: 1 });
+      this.logWrite('busy retry', actor, source, 'DB_BUSY');
+      try {
+        return await action();
+      } catch (retryError) {
+        if (!isBusyError(retryError)) throw retryError;
+        throw refusal({
+          code: 'DB_BUSY',
+          message: 'The store is busy right now. Your cart is unchanged — please try again.',
+        });
+      }
+    }
+  }
+
   private async record(
     actor: OrderActor,
     rule: string,
-    action: 'allow' | 'refuse',
+    action: GuardrailAction,
     details: Record<string, string | number | boolean | null>,
   ): Promise<void> {
     await this.guardrails.record({
@@ -450,6 +497,15 @@ function refusalCode(error: unknown): string {
   return error instanceof OrderRefusalError ? error.refusal.code : 'ERROR';
 }
 
+/** Prisma transaction conflicts (`P2028`/`P2034`) and raw SQLite busy errors. */
+function isBusyError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const code = (error as { code?: unknown }).code;
+  if (code === 'P2028' || code === 'P2034') return true;
+  const message = error instanceof Error ? error.message : '';
+  return /database is (?:locked|busy)|SQLITE_BUSY/i.test(message);
+}
+
 /** Prisma unique-constraint violation (`P2002`) without importing the runtime class. */
 function isUniqueViolation(error: unknown): boolean {
   return (
@@ -461,15 +517,18 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /** Public REST shape: 400 with the shared error code and readable message. */
-export function toHttpException(error: OrderRefusalError): BadRequestException {
+export function toHttpException(error: OrderRefusalError): HttpException {
   const { refusal: r } = error;
-  return new BadRequestException({
+  const body = {
     code: r.code,
     message: r.message,
     ...(r.limit !== undefined ? { limit: r.limit } : {}),
     ...(r.actual !== undefined ? { actual: r.actual } : {}),
     ...(r.allowed !== undefined ? { allowed: r.allowed } : {}),
-  });
+  };
+  return r.code === 'DB_BUSY'
+    ? new ServiceUnavailableException(body)
+    : new BadRequestException(body);
 }
 
 function cancelRefusal(order: OrderRow, now: Date, limits: OrderLimits): OrderRefusal | null {

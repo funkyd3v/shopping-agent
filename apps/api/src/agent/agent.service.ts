@@ -251,9 +251,21 @@ export class AgentService {
           details: { flagged: output.flaggedToolOutputs },
         });
       }
+      // Resolver/tool refusals are guardrail actions too (PLAN §10.3/§18).
+      for (const call of toolCalls) {
+        if (call.ok || !call.errorCode) continue;
+        await this.guardrails.record({
+          userId,
+          sessionId: session.id,
+          rule: `agent.tool.${call.errorCode}`,
+          action: 'refuse',
+          details: { tool: call.name },
+        });
+      }
 
       ctx.onProgress?.('generating');
-      let answer = sanitizeAnswer(output.reply, policy.maxReplyChars);
+      // Output order (PLAN §10.2): PII mask → redundancy → output format.
+      let answer = output.reply;
       const masked = redactPii(answer);
       if (masked.findings.length > 0) {
         await this.guardrails.record({
@@ -269,24 +281,6 @@ export class AgentService {
         });
         answer = masked.text;
       }
-      if (answer.trim().length === 0) {
-        runStatus = 'error';
-        errorCode = 'EMPTY_OUTPUT';
-        await this.guardrails.record({
-          userId,
-          sessionId: session.id,
-          rule: 'agent.empty_output',
-          action: 'degrade',
-        });
-        return this.providerFailure(turn, usage, {
-          route,
-          model,
-          provider,
-          promptVersion,
-          toolCalls,
-        });
-      }
-
       const redundant = detectRedundancy({
         reply: answer,
         assistantHistory: history
@@ -307,6 +301,26 @@ export class AgentService {
         });
         runStatus = 'blocked';
         return this.finish(turn, GUARDRAIL_COPY.redundancy, 'ok', usage, {
+          route,
+          model,
+          provider,
+          promptVersion,
+          toolCalls,
+        });
+      }
+
+      // Output format is last: sanitize the already-guarded answer, not raw text.
+      answer = sanitizeAnswer(answer, policy.maxReplyChars);
+      if (answer.trim().length === 0) {
+        runStatus = 'error';
+        errorCode = 'EMPTY_OUTPUT';
+        await this.guardrails.record({
+          userId,
+          sessionId: session.id,
+          rule: 'agent.empty_output',
+          action: 'degrade',
+        });
+        return this.providerFailure(turn, usage, {
           route,
           model,
           provider,
@@ -390,6 +404,7 @@ export class AgentService {
         const served = await this.gateway.generate({
           chain: 'guardrail',
           messages,
+          require: ['json'],
           temperature: 0,
           signal: ctx.signal,
         });
@@ -437,6 +452,7 @@ export class AgentService {
       toolCalls: Array<{ id: string; name: string; args: unknown }>;
       provider: string;
       model: string;
+      usage?: { inputTokens: number; outputTokens: number; estimated: boolean };
     };
 
     try {
@@ -445,6 +461,7 @@ export class AgentService {
           chain: input.chain,
           messages: input.messages,
           tools: input.tools,
+          require: ['tools'],
           temperature: input.temperature,
           signal: input.ctx.signal,
         });
@@ -453,11 +470,13 @@ export class AgentService {
           toolCalls: served.toolCalls,
           provider: served.provider,
           model: served.model,
+          usage: served.usage,
         };
       } else {
         const served = await this.gateway.generate({
           chain: input.chain,
           messages: input.messages,
+          require: input.chain === 'router' ? ['json'] : undefined,
           temperature: input.temperature,
           signal: input.ctx.signal,
         });
@@ -466,6 +485,7 @@ export class AgentService {
           toolCalls: [],
           provider: served.provider,
           model: served.model,
+          usage: served.usage,
         };
       }
     } catch (error) {
@@ -476,10 +496,19 @@ export class AgentService {
     }
     if (input.ctx.signal.aborted) throw new TurnAbortedError();
 
-    const inputTokens = estimateTokens(input.messages.map((message) => message.content).join('\n'));
-    const outputTokens = estimateTokens(result.content);
-    input.usage.inputTokens += inputTokens;
-    input.usage.outputTokens += outputTokens;
+    const estimatedInput = estimateTokens(
+      input.messages.map((message) => message.content).join('\n'),
+    );
+    const estimatedOutput = estimateTokens(`${result.content}${JSON.stringify(result.toolCalls)}`);
+    const usage = result.usage ?? {
+      inputTokens: estimatedInput,
+      outputTokens: estimatedOutput,
+      estimated: true,
+    };
+    const firstCall = input.usage.inputTokens === 0 && input.usage.outputTokens === 0;
+    input.usage.estimated = firstCall ? usage.estimated : input.usage.estimated || usage.estimated;
+    input.usage.inputTokens += usage.inputTokens;
+    input.usage.outputTokens += usage.outputTokens;
     await this.budgets.record({
       userId: input.turn.session.userId,
       sessionId: input.turn.session.id,
@@ -487,9 +516,9 @@ export class AgentService {
       kind: input.chain === 'router' ? 'router' : 'agent',
       model: result.model,
       provider: result.provider,
-      inputTokens,
-      outputTokens,
-      estimated: true,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      estimated: usage.estimated,
       latencyMs: Date.now() - started,
     });
     return result;

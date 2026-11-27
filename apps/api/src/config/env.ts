@@ -109,6 +109,9 @@ export const envSchema = z.object({
   STREAM_MODE: z.enum(['buffered', 'holdback']).default('buffered'),
   MAX_MESSAGE_CHARS: int(2000, 1),
 
+  // Per-run wall-clock deadline (PLAN §6); friendly error, never a hung stream.
+  RUN_DEADLINE_MS: int(90_000, 1),
+
   // Rate limits (requests/minute)
   RATE_LIMIT_AUTH: int(10, 1),
   RATE_LIMIT_CHAT: int(20, 1),

@@ -242,7 +242,13 @@ export class AgentToolRegistry {
     return [];
   }
 
+  /** Every tool result is untrusted data before it reaches a model (PLAN §10.2). */
   async execute(name: string, rawArgs: unknown, ctx: ToolContext): Promise<ToolExecution> {
+    const result = await this.dispatch(name, rawArgs, ctx);
+    return scanToolResult(result, AGENT_POLICY.maxToolOutputChars);
+  }
+
+  private async dispatch(name: string, rawArgs: unknown, ctx: ToolContext): Promise<ToolExecution> {
     try {
       switch (name) {
         case 'search_products': {
@@ -880,6 +886,49 @@ export class AgentToolRegistry {
     );
     return errorResult(name, 'TOOL_ERROR', 'The tool could not complete that request.');
   }
+}
+
+/**
+ * Scan every string in a tool envelope before it reaches the model. Structured
+ * data (footers, `lastListedProducts`, receipts) is built from the DB and is
+ * never rewritten — only the `message` copy sent to the model is sanitized.
+ */
+function scanToolResult(execution: ToolExecution, maxChars: number): ToolExecution {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(execution.message);
+  } catch {
+    return execution;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return execution;
+
+  let flagged = 0;
+  const scan = (text: string): string => {
+    const result = scanUntrustedText(text, maxChars);
+    flagged += result.flagged;
+    return result.text;
+  };
+  const cleaned = scanStrings(parsed, scan);
+  if (flagged === 0) return execution;
+  return {
+    ...execution,
+    message: JSON.stringify(cleaned),
+    flagged: (execution.flagged ?? 0) + flagged,
+  };
+}
+
+function scanStrings(value: unknown, scan: (text: string) => string): unknown {
+  if (typeof value === 'string') return scan(value);
+  if (Array.isArray(value)) return value.map((entry) => scanStrings(entry, scan));
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        scanStrings(entry, scan),
+      ]),
+    );
+  }
+  return value;
 }
 
 function isCartTool(name: string): boolean {

@@ -99,7 +99,9 @@ Key env overrides (all validated by zod; defaults in the policy files):
 | `JAILBREAK_LIVE_CLASSIFIER` | `false` | Opt-in `guardrail` chain for gray-zone text |
 | `REDUNDANCY_SIMILARITY_THRESHOLD` | `0.9` | Normalized-token Jaccard short-circuit |
 | `REQUEST_TOKEN_BUDGET` / `SESSION_TOKEN_BUDGET` / `DAILY_TOKEN_BUDGET` | 16k / 150k / 500k | Usage limits |
+| `RUN_DEADLINE_MS` | 90000 | Per-run wall-clock limit; friendly SSE error on expiry |
 | `MAX_ORDER_USD` / `MAX_QTY_PER_ITEM` / `CANCEL_WINDOW_MINUTES` | 200 / 5 / 30 | Order limits |
+| `RATE_LIMIT_AUTH` / `RATE_LIMIT_CHAT` / `RATE_LIMIT_CART` / `RATE_LIMIT_CHECKOUT` | 10 / 20 / 60 / 10 | Requests per minute, per user (or IP when public) |
 
 ## Troubleshooting
 

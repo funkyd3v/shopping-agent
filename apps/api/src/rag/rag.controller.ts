@@ -6,6 +6,7 @@ import { openSseStream, startSseHeartbeat, writeSseEvent, writeSseText } from '.
 import { getRequestContext } from '../common/context/request-context';
 import { CurrentUser, requireUserId } from '../common/decorators/current-user.decorator';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { withRunDeadline } from '../common/run-deadline';
 import { RAG_COPY } from '../guardrails/guardrails.policy';
 import { RagService } from './rag.service';
 import { isTurnAborted } from './retriever';
@@ -35,6 +36,7 @@ export class RagController {
 
   private async streamTurn(res: Response, prepared: PreparedTurn): Promise<void> {
     const abort = new AbortController();
+    const deadline = withRunDeadline(abort.signal);
     const onClose = () => abort.abort();
     res.on('close', onClose);
     let stopHeartbeat: (() => void) | undefined;
@@ -51,11 +53,15 @@ export class RagController {
       stopHeartbeat = startSseHeartbeat(res);
 
       const result = await this.rag.run(prepared, {
-        signal: abort.signal,
+        signal: deadline.signal,
         onProgress: (phase) => writeSseEvent(res, { type: 'status', phase }),
       });
 
       if (abort.signal.aborted) return;
+      if (deadline.expired()) {
+        this.writeDeadlineError(res, prepared);
+        return;
+      }
 
       if (result.status === 'error' && result.error) {
         writeSseEvent(res, {
@@ -86,6 +92,10 @@ export class RagController {
         usage: result.usage,
       });
     } catch (error) {
+      if (deadline.expired()) {
+        this.writeDeadlineError(res, prepared);
+        return;
+      }
       if (isTurnAborted(error) || abort.signal.aborted) {
         // Aborted before completion: no assistant row, lock released in finally.
         return;
@@ -110,6 +120,24 @@ export class RagController {
       res.off('close', onClose);
       if (!res.writableEnded) res.end();
     }
+  }
+
+  /** Server-side timeout: friendly error, no partial answer (PLAN §6). */
+  private writeDeadlineError(res: Response, prepared: PreparedTurn): void {
+    writeSseEvent(res, {
+      type: 'error',
+      code: 'PROVIDER_UNAVAILABLE',
+      message: RAG_COPY.providerError,
+      retryable: true,
+      requestId: requestId(),
+    });
+    writeSseEvent(res, {
+      type: 'done',
+      messageId: prepared.turnId,
+      sessionId: prepared.session.id,
+      runId: prepared.runId,
+      status: 'error',
+    });
   }
 
   private streamReplay(res: Response, prepared: PreparedTurn): void {

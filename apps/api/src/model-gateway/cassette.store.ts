@@ -1,25 +1,41 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 
 /**
- * Cassette store for LLM_MODE=replay (PLAN §15/§18: tests never hit the
- * network). Cassettes are keyed by sha256(provider|model|mode|messages).
+ * Cassette store for `LLM_MODE=record|replay` (PLAN §4/§6/§17). Keys include
+ * role and tool-schema fingerprint so the same prompt with a different toolset
+ * cannot replay an incompatible response. Only synthetic, PII-free cassettes
+ * may be committed; recording writes to `evals/cassettes/` by default.
  */
 @Injectable()
 export class CassetteStore {
   private readonly logger = new Logger(CassetteStore.name);
   private readonly dir: string;
+  private readonly replay: boolean;
   private readonly enabled: boolean;
 
   constructor() {
-    this.dir = join(process.cwd(), 'cassettes');
-    this.enabled = (process.env.LLM_MODE ?? 'live') === 'replay';
+    // Works from the repo root (`pnpm eval:*`) and from apps/api (`vitest`).
+    const cwd = process.cwd();
+    const root = existsSync(join(cwd, 'pnpm-workspace.yaml')) ? cwd : join(cwd, '..', '..');
+    this.dir = process.env.CASSETTE_DIR
+      ? resolve(process.env.CASSETTE_DIR)
+      : join(root, 'evals', 'cassettes');
+    const mode = process.env.LLM_MODE ?? 'live';
+    this.replay = mode === 'replay';
+    this.enabled = this.replay || mode === 'record';
   }
 
-  key(provider: string, model: string, mode: string, messages: unknown): string {
-    const canonical = JSON.stringify({ provider, model, mode, messages });
+  key(
+    provider: string,
+    model: string,
+    role: string,
+    messages: unknown,
+    tools: unknown[] = [],
+  ): string {
+    const canonical = JSON.stringify({ provider, model, role, messages, tools });
     return createHash('sha256').update(canonical).digest('hex');
   }
 
@@ -36,7 +52,8 @@ export class CassetteStore {
 
   /** Tool-calling cassettes keep both text and normalized tool calls. */
   loadJson(key: string): unknown | null {
-    if (!this.enabled) return null;
+    // Record mode must never serve stale fixtures: it only writes them.
+    if (!this.replay) return null;
     const file = join(this.dir, `${key}.json`);
     if (!existsSync(file)) return null;
     try {

@@ -146,6 +146,20 @@ describe('classifyJailbreak', () => {
     expect(verdict.source).toBe('degraded');
   });
 
+  it('fails closed for a benign side effect when the classifier is down', async () => {
+    const verdict = await classifyJailbreak({
+      message: 'Order 2 of the first one.',
+      sideEffects: true,
+      classify: async () => {
+        throw new Error('provider down');
+      },
+    });
+    expect(verdict.score).toBe(0);
+    expect(verdict.blocked).toBe(true);
+    expect(verdict.reasons).toContain('jb.classifier_failed');
+    expect(verdict.source).toBe('degraded');
+  });
+
   it('never sends raw PII in the classifier prompt beyond the redacted text it receives', () => {
     const messages = buildJailbreakClassifierMessages('redacted text', [
       { role: 'user', content: '[REDACTED_EMAIL]' },

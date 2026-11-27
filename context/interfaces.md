@@ -39,9 +39,10 @@ GET  /users/me                                        PATCH /users/me/address
 - Cancel is idempotent.
 - Input limits: message ≤2000, query ≤200, items ≤10, qty ≤5, cart lines ≤20.
 - Pagination: `limit` (20, max 100) + cursor; products use limit/offset.
-- Rate limits per IP/user; auth/chat/cart/checkout have separate stricter limits.
-- Error codes in `packages/shared/errors.ts` (`AUTH_REQUIRED`, `BUDGET_EXHAUSTED`, `PROVIDER_UNAVAILABLE`, `ORDER_LIMIT`, `CART_EMPTY`, `OUT_OF_STOCK`, `NO_ADDRESS`, `NEEDS_CLARIFICATION`, ...). REST errors are JSON; SSE guardrail refusals are assistant text.
-- CSRF: `SameSite=Lax/Strict`, `Origin` check, strict CORS, `helmet`.
+- **Implemented:** in-process fixed-window rate limiting (`common/guards/rate-limit.guard.ts`) keyed by authenticated user (or IP on public routes): auth 10, chat 20, cart 60, checkout 10 per minute; unclassified routes use the cart limit. Exceeding a bucket returns JSON `429 RATE_LIMITED` via `AllExceptionsFilter`.
+- Error codes in `packages/shared/errors.ts` (`AUTH_REQUIRED`, `BUDGET_EXHAUSTED`, `PROVIDER_UNAVAILABLE`, `LLM_MODE_NO_CASSETTE`, `DB_BUSY`, `ORDER_LIMIT`, `CART_EMPTY`, `OUT_OF_STOCK`, `NO_ADDRESS`, `NEEDS_CLARIFICATION`, ...). REST errors are JSON; SSE guardrail refusals are assistant text. `DB_BUSY` is a 503 after one busy-DB retry.
+- CSRF: `SameSite=Lax/Strict`, `Origin` check, strict CORS; **helmet is registered in `main.ts`**.
+- Per-run SSE deadline `RUN_DEADLINE_MS` (default 90 s): server-side timeout emits a friendly `PROVIDER_UNAVAILABLE` error + `done { status: 'error' }`; a client Stop still ends the stream silently.
 
 ## SSE
 
@@ -94,7 +95,7 @@ Next.js rewrites `/api/*` to NestJS so cookies are same-origin.
 - DB: `DATABASE_URL`, `CHECKPOINT_DATABASE_PATH`.
 - Limits: `MAX_ORDER_USD`, `MAX_QTY_PER_ITEM`, `MAX_AGENT_ORDERS_PER_DAY`, `MAX_AGENT_SPEND_PER_DAY_USD`, `CANCEL_WINDOW_MINUTES`, `MAX_CART_LINES`.
 - Budgets: `REQUEST_TOKEN_BUDGET`, `SESSION_TOKEN_BUDGET`, `DAILY_TOKEN_BUDGET`.
-- Streaming/input: `STREAM_MODE=buffered`, `MAX_MESSAGE_CHARS`.
+- Streaming/input: `STREAM_MODE=buffered`, `MAX_MESSAGE_CHARS`, `RUN_DEADLINE_MS` (90 s).
 - Rate limits: `RATE_LIMIT_AUTH`, `RATE_LIMIT_CHAT`, `RATE_LIMIT_CART`, `RATE_LIMIT_CHECKOUT`.
 
 Policy file provides defaults; env overrides; zod validates at startup.

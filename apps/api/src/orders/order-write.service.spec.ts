@@ -529,6 +529,50 @@ describe('OrderWriteService.checkout', () => {
     expect(h.prisma.orderCount()).toBe(1);
     expect(h.prisma.products.get('prod_01')?.stock).toBe(8);
   });
+
+  it('retries once on a busy DB, then refuses with DB_BUSY and leaves the cart intact', async () => {
+    const h = readyHarness();
+    let attempts = 0;
+    (
+      h.prisma as unknown as {
+        $transaction: (fn: (tx: FakePrisma) => Promise<unknown>) => Promise<unknown>;
+      }
+    ).$transaction = async () => {
+      attempts += 1;
+      throw Object.assign(new Error('database is locked'), { code: 'P2034' });
+    };
+
+    await expect(h.checkout.checkout(pageActor(), 'req-busy')).rejects.toMatchObject({
+      refusal: { code: 'DB_BUSY' },
+    });
+    expect(attempts).toBe(2);
+    expect(h.guardrails.events).toContainEqual(
+      expect.objectContaining({ rule: 'order.db_busy', action: 'degrade' }),
+    );
+    expect(h.prisma.carts.get('user_01')?.items).toHaveLength(1);
+    expect(h.prisma.orderCount()).toBe(0);
+  });
+
+  it('succeeds when the busy retry goes through', async () => {
+    const h = readyHarness();
+    const original = h.prisma.$transaction.bind(h.prisma);
+    let attempts = 0;
+    (
+      h.prisma as unknown as {
+        $transaction: (fn: (tx: FakePrisma) => Promise<unknown>) => Promise<unknown>;
+      }
+    ).$transaction = async (fn) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error('SQLITE_BUSY'), { code: 'SQLITE_BUSY' });
+      }
+      return original(fn);
+    };
+
+    const order = await h.checkout.checkout(pageActor(), 'req-busy-retry');
+    expect(order.status).toBe('placed');
+    expect(attempts).toBe(2);
+  });
 });
 
 describe('OrderService.placeDirect', () => {

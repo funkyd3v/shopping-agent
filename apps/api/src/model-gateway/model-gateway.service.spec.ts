@@ -168,6 +168,65 @@ describe('ModelGatewayService', () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  describe('provider hardening (PLAN §6)', () => {
+    const noDelay = { baseMs: 0, maxMs: 0, jitter: false };
+
+    function hardened(invokeFn?: InvokeFn): ModelGatewayService {
+      return new ModelGatewayService(new CassetteStore(), invokeFn, undefined, noDelay);
+    }
+
+    it('retries the next provider on a 5xx with backoff', async () => {
+      const calls: string[] = [];
+      const invoke: InvokeFn = async ({ provider }) => {
+        calls.push(provider);
+        if (provider === 'groq') {
+          throw Object.assign(new Error('upstream 503'), { status: 503 });
+        }
+        return 'recovered answer';
+      };
+
+      const result = await hardened(invoke).generate({ chain: 'router', messages });
+
+      expect(result.content).toBe('recovered answer');
+      expect(result.attempt).toBe(1);
+      expect(calls).toEqual(['groq', 'gemini']);
+    });
+
+    it('does not fall back after a fatal 401', async () => {
+      const invoke = vi.fn(async () => {
+        throw Object.assign(new Error('bad api key'), { status: 401 });
+      });
+
+      await expect(hardened(invoke).generate({ chain: 'router', messages })).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+      expect(invoke).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses provider usage metadata instead of estimating it', async () => {
+      const invoke: InvokeFn = async () => ({
+        content: 'answer',
+        usage: { inputTokens: 11, outputTokens: 7, estimated: false },
+      });
+
+      const result = await hardened(invoke).generate({ chain: 'router', messages });
+
+      expect(result.usage).toEqual({ inputTokens: 11, outputTokens: 7, estimated: false });
+    });
+
+    it('stops using providers whose daily token budget is spent', async () => {
+      process.env.PROVIDER_DAILY_TOKEN_BUDGET = '1';
+      const invoke: InvokeFn = async () => 'answer';
+      const gateway = hardened(invoke);
+
+      await gateway.generate({ chain: 'router', messages }); // groq
+      await gateway.generate({ chain: 'router', messages }); // gemini
+      await expect(gateway.generate({ chain: 'router', messages })).rejects.toMatchObject({
+        code: 'NO_MODEL_AVAILABLE',
+      });
+    });
+  });
+
   describe('generateWithTools', () => {
     const tools = [
       {

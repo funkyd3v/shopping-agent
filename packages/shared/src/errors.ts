@@ -20,6 +20,7 @@ export const ERROR_CODES = [
   'BUDGET_EXHAUSTED',
   'PROVIDER_UNAVAILABLE',
   'LLM_MODE_NO_CASSETTE',
+  'DB_BUSY',
   // cart / orders
   'CART_EMPTY',
   'CART_LIMIT',
