@@ -5,13 +5,18 @@ products, summarize reviews, add items to your cart, place an order, check out,
 cancel an order, or answer questions about shipping and returns. The assistant
 works on the same data you see on the store pages.
 
-This is a portfolio project: an AI agent connected to real application code,
-with limits and safety checks enforced in code rather than only in prompts.
+An AI agent connected to real application code, with limits and safety checks
+enforced in code rather than only in prompts.
 
 > **Under active development.** This is an MVP demo, not a production store.
 > Payments are simulated, all products and reviews are generated demo data, and
 > some planned work (browser end-to-end tests, extra operational tooling) is
 > still in progress. Please do not enter real personal information.
+
+## Highlights
+
+- **Multi-model AI agent:** work is routed across several AI models, with
+  automatic fallback to another provider when one is unavailable.
 
 ## What you can try
 
