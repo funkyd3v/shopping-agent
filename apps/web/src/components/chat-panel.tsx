@@ -374,7 +374,7 @@ export function ChatPanel({ config }: { config: ChatPanelConfig }) {
   if (fixedComposer) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-4">
-        <div className="min-h-[20rem] flex-1 overflow-y-auto overscroll-contain pb-4 pr-2">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-4 pr-2">
           {conversation}
         </div>
         {status}

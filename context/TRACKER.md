@@ -105,7 +105,7 @@
 | 2026-11-27 | 7+ | Fixed stale-cookie 500 on `/help` after `demo:reset`: stable seed user IDs + `JwtAuthGuard` existence check (401 instead of FK 500); 359 API tests, CI green | `apps/api/prisma/seed.ts`, `apps/api/src/common/guards/jwt-auth.guard.{ts,spec.ts}`, `docs/decisions.md` | P1 E2E |
 | 2026-11-27 | 7+ | Made `/help` usable without sign-in: signed guest cookie → isolated guest user, RAG/session routes anonymous-capable, guest rate-limits keyed by IP; PLAN §21 amended | `apps/api/src/common/guards/anonymous-identity.guard.{ts,spec.ts}`, `apps/api/src/{app.module.ts,rag/rag.controller.ts,chat/sessions.controller.ts}`, `PLAN.md`, `docs/*` | P1 E2E |
 | 2026-11-27 | 7+ | Removed the visible `Sources:` section from `/help`: no server footer, no client metadata rendering, answer-only prompt; sources kept in stored metadata for eval/audit | `apps/api/src/rag/{rag.service.ts,prompt.ts,*.spec.ts}`, `apps/web/src/components/{chat-message.tsx,help-chat.tsx}`, `PLAN.md`, `context/agents.md`, `docs/*` | P1 E2E |
-| 2026-11-27 | 7+ | `/help` chat UI: full-height layout, scrollable transcript, pinned composer with fixed Send; opt-in via `fixedComposer` so `/assistant` is unchanged | `apps/web/src/app/help/page.tsx`, `apps/web/src/components/{chat-panel.tsx,help-chat.tsx}`, `context/TRACKER.md` | P1 E2E |
+| 2026-11-27 | 7+ | `/help` chat UI: chat surface pinned to the viewport below the header, transcript scrolls independently, composer (input + Send) stays at the bottom instead of drifting with the page; `/assistant` unchanged | `apps/web/src/app/help/page.tsx`, `apps/web/src/components/chat-panel.tsx`, `docs/decisions.md` | P1 E2E |
 
 ## Blockers and open questions
 
