@@ -38,6 +38,9 @@ export function ChatMessageView({
                   <a
                     key={key}
                     href={segment.href}
+                    {...(segment.href.startsWith('/products/')
+                      ? { target: '_blank', rel: 'noopener noreferrer' }
+                      : {})}
                     className="font-medium text-accent underline underline-offset-4 hover:text-accent/80"
                   >
                     {segment.label}

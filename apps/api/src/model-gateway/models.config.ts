@@ -102,7 +102,7 @@ export const CHAINS: Record<string, ChainEntry> = {
   router: { name: 'router', models: [gptOss20b, gemini35FlashLite] },
   guardrail: { name: 'guardrail', models: [gptOss20b, gemini35FlashLite] },
   agent: { name: 'agent', models: [gptOss120b, gemini36Flash] },
-  rag: { name: 'rag', models: [gptOss120b, gemini36Flash] },
+  rag: { name: 'rag', models: [gemini36Flash, gptOss120b] },
   summarizer: { name: 'summarizer', models: [gemini36Flash, gptOss120b] },
 };
 

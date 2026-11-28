@@ -11,9 +11,11 @@ export function buildProductFooter(products: ProductFooterItem[]): string {
   const lines = products.map((product, index) => {
     const rating = product.ratingCount > 0 ? `${product.ratingAvg.toFixed(1)}/5` : 'no ratings yet';
     const link = `/products/${product.id}`;
-    return `${index + 1}. ${label(product.name)} — ${formatUsd(product.priceCents)} — ${rating} — ${
-      isSafeChatHref(link) ? link : ''
-    }`;
+    // The product name itself is the link, so the raw `/products/:id` is not repeated.
+    const name = isSafeChatHref(link)
+      ? `[${markdownLabel(product.name)}](${link})`
+      : label(product.name);
+    return `${index + 1}. ${name} — ${formatUsd(product.priceCents)} — ${rating}`;
   });
   return `\n\nProducts:\n${lines.join('\n')}`;
 }
@@ -109,6 +111,11 @@ export function buildAgentFooter(
   cart: LastCartSummary = null,
 ): string {
   return `${buildProductFooter(products)}${buildOrderFooter(orders)}${buildCartFooter(cart)}`;
+}
+
+/** Link text for `[label](href)`; square brackets would break the markdown link. */
+export function markdownLabel(value: string): string {
+  return label(value).replace(/[[\]]/g, '');
 }
 
 function label(value: string): string {

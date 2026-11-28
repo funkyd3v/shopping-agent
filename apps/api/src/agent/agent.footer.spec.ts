@@ -19,7 +19,15 @@ describe('agent footers', () => {
     ]);
 
     expect(footer).toContain('Products:');
-    expect(footer).toContain('1. Wireless Headphones — $79.99 — 4.6/5 — /products/prod_1');
+    expect(footer).toContain('1. [Wireless Headphones](/products/prod_1) — $79.99 — 4.6/5');
+    expect(footer).not.toContain('4.6/5 — /products/prod_1');
+  });
+
+  it('drops square brackets from link text so the markdown link stays valid', () => {
+    const footer = buildProductFooter([
+      { id: 'prod_1', name: '[Refurb] Headphones', priceCents: 1000, ratingAvg: 4, ratingCount: 1 },
+    ]);
+    expect(footer).toContain('[Refurb Headphones](/products/prod_1)');
   });
 
   it('says when a product has no ratings', () => {

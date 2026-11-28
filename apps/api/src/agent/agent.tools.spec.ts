@@ -104,6 +104,7 @@ function setup() {
       nextCursor: null,
     })),
     getById: vi.fn(async () => ({ product, reviews: [] })),
+    listCategories: vi.fn(async () => ['Audio', 'Home']),
     listReviews: vi.fn(async () => ({
       product: { id: product.id, name: product.name },
       reviews: [
@@ -240,6 +241,41 @@ describe('AgentToolRegistry', () => {
     expect(result.products?.map((item) => item.id)).toEqual(['prod_1', 'prod_3']);
     expect(result.lastListedProducts?.map((item) => item.position)).toEqual([1, 2]);
     expect(result.record).toEqual({ name: 'search_products', ok: true });
+  });
+
+  it('maps a category to its canonical catalog spelling', async () => {
+    const { registry, products } = setup();
+
+    await registry.execute('search_products', { query: 'headphones', category: 'audio' }, context);
+
+    expect(products.search).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'headphones', category: 'Audio' }),
+    );
+  });
+
+  it('drops a category the catalog does not use so the query still runs', async () => {
+    const { registry, products } = setup();
+
+    const result = await registry.execute(
+      'search_products',
+      { query: 'blanket', category: 'Blankets' },
+      context,
+    );
+
+    expect(products.search).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'blanket', category: undefined }),
+    );
+    expect(result.products?.length).toBeGreaterThan(0);
+  });
+
+  it('uses an unknown category as query text when no query is given', async () => {
+    const { registry, products } = setup();
+
+    await registry.execute('search_products', { category: 'Blankets' }, context);
+
+    expect(products.search).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'Blankets', category: undefined }),
+    );
   });
 
   it('flags injection text inside reviews before returning it', async () => {

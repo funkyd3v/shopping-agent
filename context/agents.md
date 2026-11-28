@@ -57,10 +57,10 @@ START → input_guardrails → router ─┬→ search ─┐
 - Router confidence `AGENT_ROUTER_MIN_CONFIDENCE=0.55`; below it, a deterministic keyword/pattern heuristic decides, so a provider failure still yields a useful route.
 - Tools call `ProductSearchService` / `OrderService`; no raw SQL, no identity parameters. Outputs are untrusted envelopes with a flag scan and a `maxToolOutputChars` cap.
 - Deterministic fallbacks: search parses query/price/category; history lists 5 orders; review resolves an ordinal/name/id from `lastListedProducts`. The model only writes prose from tool results.
-- Product/order footers are server-generated (`/products/:id`, `/orders/:id`); the model must not restate IDs/totals.
+- Product/order footers are server-generated (`/products/:id`, `/orders/:id`); the model must not restate IDs/totals. Product link text is always the product name (`[Name](/products/:id)`), and `agent.links.ts` rewrites any bare `/products/:id` the model echoes before the footer is appended.
 - Checkpointer: `CHECKPOINT_DATABASE_PATH` (default `./data/checkpoints.db`), thread `${userId}:${sessionId}`, recursion limit 25, per-turn caps `AGENT_MAX_MODEL_CALLS=6`, `AGENT_MAX_TOOL_CALLS=4`.
 - `/agent/chat`: same buffered-SSE lifecycle as RAG (replay, per-session 409, persist-before-stream) plus `agent_runs` audit and per-call `token_usage`.
-- `/assistant` uses the shared `ChatPanel`; no agent-specific UI. Chat markdown links are filtered to `/products/:id`, `/cart`, `/orders/:id`, `/help`, `/assistant`, or https.
+- `/assistant` uses the shared `ChatPanel`; no agent-specific UI. Chat markdown links are filtered to `/products/:id`, `/cart`, `/orders/:id`, `/help`, `/assistant`, or https. Bare store paths fall back to "View product" / "View order" / "View cart" anchor text, never the raw path.
 
 ## Shared state (bounded)
 
@@ -96,8 +96,8 @@ Identity is injected from request context, never a tool parameter; all args are 
 
 | Agent | Tool | Input | Output |
 |---|---|---|---|
-| Search | `search_products` | `query?`, `category?`, `minPrice?`, `maxPrice?`, `minRating?`, `limit` (5, max 10) | products + `/products/:id` + footer |
-| Search | `get_product` | `productId` | one product + link |
+| Search | `search_products` | `query?`, `category?`, `minPrice?`, `maxPrice?`, `minRating?`, `limit` (5, max 10) | products + named markdown link + footer |
+| Search | `get_product` | `productId` | one product + named markdown link |
 | Review | `get_reviews` | `productId`, `limit` (5, max 10), `sort` | reviews (untrusted) |
 | Cart | `view_cart` | — | lines, subtotal, warnings, `/cart` |
 | Cart | `add_to_cart` | `productId`, `qty` 1..5 | updated line + footer; stock/line/qty limits |
@@ -129,7 +129,7 @@ Code, not a prompt. Runs before any cart/order side effect; returns a resolved i
 ## Replies, footers, injection
 
 - Plain text with minimal markdown; numbered lists so follow-ups resolve.
-- Server-generated footers after output guardrails: products (name, price, rating, link), cart (lines, qty, unit price, line total, subtotal, `/cart`), orders (items, qty, prices, total, order number, status, cancel deadline, `/orders/:id`). The agent must not restate exact order totals/IDs.
+- Server-generated footers after output guardrails: products (name as the markdown link, price, rating), cart (lines, qty, unit price, line total, subtotal, `/cart`), orders (items, qty, prices, total, order number, status, cancel deadline, `/orders/:id`). The agent must not restate exact order totals/IDs, and a bare product path in its prose is rewritten to the product name link.
 - Prompts are soft guidance; hard rules live in code.
 - Order/cart agents get structured state only, never raw review/product text. Tool-output scan neutralizes flagged text. An injected review cannot create a product ref or quantity.
 - Tests: malicious review → summarize → "ok do it" → no order; user-selected listed product + quantity from user text → allowed.

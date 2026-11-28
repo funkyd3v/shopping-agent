@@ -91,6 +91,15 @@ export class ProductSearchService {
     return { product, reviews: reviews.map(toReviewDto) };
   }
 
+  /** Distinct catalog categories, for validating filter values (agent tools). */
+  async listCategories(): Promise<string[]> {
+    const rows = await this.prisma.product.groupBy({
+      by: ['category'],
+      orderBy: { category: 'asc' },
+    });
+    return rows.map((row) => row.category);
+  }
+
   async getById(id: string): Promise<ProductDetail> {
     const product = await this.prisma.product.findUnique({
       where: { id },

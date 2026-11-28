@@ -8,15 +8,15 @@ describe('parseChatLinks', () => {
     ]);
   });
 
-  it('linkifies bare product, order, and cart paths', () => {
+  it('linkifies bare product, order, and cart paths with readable labels', () => {
     const segments = parseChatLinks('Open /products/prod_1, /orders/order_1, or /cart.');
     expect(segments).toEqual([
       { type: 'text', text: 'Open ' },
-      { type: 'link', href: '/products/prod_1', label: '/products/prod_1' },
+      { type: 'link', href: '/products/prod_1', label: 'View product' },
       { type: 'text', text: ', ' },
-      { type: 'link', href: '/orders/order_1', label: '/orders/order_1' },
+      { type: 'link', href: '/orders/order_1', label: 'View order' },
       { type: 'text', text: ', or ' },
-      { type: 'link', href: '/cart', label: '/cart' },
+      { type: 'link', href: '/cart', label: 'View cart' },
       { type: 'text', text: '.' },
     ]);
   });

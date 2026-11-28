@@ -36,9 +36,9 @@ Rules:
 - If you are unsure, choose clarify with low confidence.
 Return ONLY compact JSON: {"agent":"search|review|history|cart|order|clarify","confidence":0.0-1.0,"reason":"short reason"}.`;
 
-export function buildRouterMessages(state: RouterState): ChatMessage[] {
+export function buildRouterMessages(state: RouterState, historyMessages: number): ChatMessage[] {
   const transcript = state.recentMessages
-    .slice(-6)
+    .slice(-historyMessages)
     .map(
       (turn) =>
         `${turn.role === 'user' ? 'Customer' : 'Assistant'}: ${turn.content

@@ -11,9 +11,9 @@ export type AgentPolicy = {
   /** Bounded structured state (PLAN §8.2). */
   maxListedProducts: number;
   maxReplyChars: number;
-  /** Redacted turns sent to router/specialists. */
-  routerHistoryTurns: number;
-  specialistHistoryTurns: number;
+  /** Redacted recent messages (not turns) sent to the router/specialists. */
+  routerHistoryMessages: number;
+  specialistHistoryMessages: number;
   /** Below this confidence, fall back to the deterministic heuristic. */
   routerMinConfidence: number;
   /** Search tool defaults and bounds. */
@@ -47,9 +47,9 @@ export const AGENT_POLICY: AgentPolicy = {
   /** Bounded structured state (PLAN §8.2). */
   maxListedProducts: 10,
   maxReplyChars: 4_000,
-  /** Redacted turns sent to router/specialists. */
-  routerHistoryTurns: 6,
-  specialistHistoryTurns: 6,
+  /** Redacted recent messages (not turns) sent to the router/specialists. */
+  routerHistoryMessages: 12,
+  specialistHistoryMessages: 12,
   /** Below this confidence, fall back to the deterministic heuristic. */
   routerMinConfidence: 0.55,
   /** Search tool defaults and bounds. */
@@ -71,8 +71,8 @@ export const AGENT_POLICY: AgentPolicy = {
 
 export const AGENT_PROMPT_VERSIONS = {
   router: 'agent-router-v3',
-  search: 'agent-search-v1',
-  review: 'agent-review-v1',
+  search: 'agent-search-v2',
+  review: 'agent-review-v2',
   cart: 'agent-cart-v1',
   order: 'agent-order-v1',
   history: 'agent-history-v1',

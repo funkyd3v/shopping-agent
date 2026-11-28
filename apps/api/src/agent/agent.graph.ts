@@ -151,7 +151,7 @@ async function routeNode(state: State, deps: AgentGraphDeps): Promise<Partial<St
   try {
     const result = await deps.modelCall({
       chain: 'router',
-      messages: buildRouterMessages(state),
+      messages: buildRouterMessages(state, policy.routerHistoryMessages),
       temperature: 0,
     });
     model = result.model;
@@ -602,7 +602,7 @@ function buildSpecialistUserMessage(
   policy: AgentPolicy,
 ): string {
   const history = state.recentMessages
-    .slice(-policy.specialistHistoryTurns)
+    .slice(-policy.specialistHistoryMessages)
     .map(
       (turn) =>
         `${turn.role === 'user' ? 'Customer' : 'Assistant'}: ${turn.content

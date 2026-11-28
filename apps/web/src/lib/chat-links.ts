@@ -46,7 +46,7 @@ export function parseChatLinks(input: string): ChatLinkSegment[] {
     } else if (bareHref !== undefined) {
       pushText(prefix ?? '');
       if (isSafeChatHref(bareHref)) {
-        segments.push({ type: 'link', href: bareHref, label: bareHref });
+        segments.push({ type: 'link', href: bareHref, label: bareLinkLabel(bareHref) });
       } else {
         pushText(bareHref);
       }
@@ -58,4 +58,14 @@ export function parseChatLinks(input: string): ChatLinkSegment[] {
 
   pushText(input.slice(cursor));
   return segments;
+}
+
+/**
+ * Bare paths are a legacy/fallback shape: the server normally sends a named
+ * markdown link. Never surface the raw path as the anchor text.
+ */
+function bareLinkLabel(href: string): string {
+  if (href.startsWith('/products/')) return 'View product';
+  if (href.startsWith('/orders/')) return 'View order';
+  return 'View cart';
 }

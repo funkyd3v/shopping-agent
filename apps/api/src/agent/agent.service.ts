@@ -28,6 +28,7 @@ import { sanitizeAnswer } from '../rag/prompt';
 import { AGENT_CHECKPOINTER } from './agent.checkpointer';
 import { buildAgentFooter } from './agent.footer';
 import { runAgentGraph } from './agent.graph';
+import { linkifyProductPaths } from './agent.links';
 import {
   AGENT_COPY,
   AGENT_POLICY,
@@ -126,7 +127,7 @@ export class AgentService {
       const history = await this.sessions.loadRecentTurns(
         session.id,
         userMessage.seq,
-        policy.routerHistoryTurns,
+        Math.max(policy.routerHistoryMessages, policy.specialistHistoryMessages),
       );
       const jailbreak = await this.checkJailbreak(
         message,
@@ -311,6 +312,9 @@ export class AgentService {
 
       // Output format is last: sanitize the already-guarded answer, not raw text.
       answer = sanitizeAnswer(answer, policy.maxReplyChars);
+      // Never render a bare `/products/:id` in the transcript: use the product
+      // name as the link text, falling back to the products known this turn.
+      answer = linkifyProductPaths(answer, [...output.productFooter, ...output.lastListedProducts]);
       if (answer.trim().length === 0) {
         runStatus = 'error';
         errorCode = 'EMPTY_OUTPUT';

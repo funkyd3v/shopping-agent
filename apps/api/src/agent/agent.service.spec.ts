@@ -209,6 +209,18 @@ describe('AgentService', () => {
     expect(sessions.updateUserModelContent).toHaveBeenCalledWith('message_1', expect.any(String));
   });
 
+  it('replaces a bare product path in the reply with a named link', async () => {
+    const { service } = setup({
+      toolCall: { id: 'call_1', name: 'search_products', args: { query: 'headphones' } },
+      reply: 'You can see it here: /products/prod_1.',
+    });
+
+    const result = await service.run(preparedTurn(), { signal: new AbortController().signal });
+
+    expect(result.text).toContain('You can see it here: [Wireless Headphones](/products/prod_1).');
+    expect(result.text).not.toContain('here: /products/prod_1');
+  });
+
   it('appends the server cart footer after a cart turn', async () => {
     const { service, persisted } = setup({
       router: '{"agent":"cart","confidence":0.95,"reason":"cart"}',

@@ -9,7 +9,7 @@ the sources it used. Both chats work on the same data you see on the store pages
 
 Limits and safety checks are enforced in code rather than only in prompts.
 
-> **Under active development.** This is an MVP demo, not a production store.
+> This is an MVP demo, not a production store.
 > Payments are simulated, all products and reviews are generated demo data, and
 > some planned work (browser end-to-end tests, extra operational tooling) is
 > still in progress. Please do not enter real personal information.

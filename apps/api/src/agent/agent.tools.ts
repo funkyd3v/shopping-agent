@@ -19,6 +19,7 @@ import {
   cartToSummary,
   parseCartIntent,
 } from './agent.cart';
+import { productChatLink } from './agent.links';
 import {
   type OrderClarification,
   type OrderIntent,
@@ -325,10 +326,11 @@ export class AgentToolRegistry {
       ? Math.min(AGENT_POLICY.maxSearchPool, Math.max(limit * 4, 20))
       : limit;
 
+    const { query, category } = await this.resolveFilters(args.query, args.category);
     const minRating = args.minRating;
     const result = await this.products.search({
-      q: args.query,
-      category: args.category,
+      q: query,
+      category,
       minPrice: args.minPrice,
       maxPrice: args.maxPrice,
       limit: poolLimit,
@@ -370,12 +372,12 @@ export class AgentToolRegistry {
           ratingCount: product.ratingCount,
           stock: product.stock,
           category: product.category,
-          link: `/products/${product.id}`,
+          link: productChatLink(product.id, product.name),
         })),
         count: filtered.length,
         applied: {
-          query: args.query ?? null,
-          category: args.category ?? null,
+          query: query ?? null,
+          category: category ?? null,
           minPrice: args.minPrice ?? null,
           maxPrice: args.maxPrice ?? null,
           minRating: args.minRating ?? null,
@@ -385,6 +387,28 @@ export class AgentToolRegistry {
       products,
       fallbackText: products.length === 0 ? AGENT_COPY.noProducts : AGENT_COPY.searchFallbackIntro,
     };
+  }
+
+  /**
+   * The model may pass a category the catalog does not use ("Blankets",
+   * "Furniture") or the wrong case. The service filters categories by exact
+   * match, so an invented value silently returns zero rows. Map known values
+   * to their canonical spelling; otherwise drop the filter and, when there is
+   * no query yet, search the category word as text instead.
+   */
+  private async resolveFilters(
+    rawQuery: string | undefined,
+    rawCategory: string | undefined,
+  ): Promise<{ query?: string; category?: string }> {
+    const query = rawQuery?.trim() || undefined;
+    const wanted = rawCategory?.trim();
+    if (!wanted) return { query };
+
+    const categories = await this.products.listCategories();
+    const canonical = categories.find(
+      (category) => category.toLowerCase() === wanted.toLowerCase(),
+    );
+    return canonical ? { query, category: canonical } : { query: query ?? wanted };
   }
 
   private async getProduct(productId: string): Promise<ToolExecution> {
@@ -409,7 +433,7 @@ export class AgentToolRegistry {
           ratingAvg: product.ratingAvg,
           ratingCount: product.ratingCount,
           stock: product.stock,
-          link: `/products/${product.id}`,
+          link: productChatLink(product.id, product.name),
         },
       }),
       lastListedProducts: [{ ...footer, position: 1, sku: product.sku }],
